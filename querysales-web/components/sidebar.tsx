@@ -4,6 +4,7 @@
 
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -74,9 +75,14 @@ export function Sidebar() {
       >
         {/* Brand */}
         <div className="flex items-center gap-3 px-6 py-5 border-b border-border">
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl aurora-gradient">
-            <span className="text-white text-lg font-bold">Q</span>
-          </div>
+          <Image
+            src="/logo.png"
+            alt="QuerySales AI"
+            width={36}
+            height={36}
+            priority
+            className="w-9 h-9"
+          />
           <div>
             <h1 className="text-sm font-bold text-text">QuerySales AI</h1>
             <p className="text-xs text-text-muted">Sales Intelligence</p>
