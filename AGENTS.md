@@ -331,6 +331,16 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   hitting Neon Auth must always set an explicit `Origin` (any localhost port is
   trusted; deployed domains must be registered in the Neon Auth console).
 
+- **2026-09-04 — Settings UI is now full per-user config management** (closes the
+  Phase 9 gap "status but not key management"). `/settings` fetches
+  `GET /api/settings/{llm,embedding,email}` in parallel and renders one form per
+  section with Save (PUT) / Test (POST …/test) / Remove (DELETE) via Next proxy
+  routes `app/api/settings/[section]/route.ts` and `…/[section]/test/route.ts`.
+  There is **no combined `/api/settings/status` endpoint** — an earlier page
+  called it and 404'd. The Database card was removed from the UI by request;
+  the backend `GET /api/settings/database` (postgres + pgvector status) was kept
+  for debugging via curl.
+
 ---
 
 ## 8. Decision Log

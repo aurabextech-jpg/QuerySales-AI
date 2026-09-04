@@ -95,6 +95,13 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "PUT",
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
 export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   return apiFetch<T>(path, {
     method: "PATCH",

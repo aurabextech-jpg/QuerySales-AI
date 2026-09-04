@@ -122,13 +122,35 @@ export interface OutreachDraft {
 
 /* ── Settings ──────────────────────────────────────────────────────── */
 
-export interface ConfigStatus {
+/** Mirrors backend LLMConfigResponse (GET /api/settings/llm). */
+export interface LLMConfig {
   configured: boolean;
-  masked: string | null;
+  provider_name: string | null;
+  base_url: string | null;
+  model: string | null;
+  temperature: number | null;
+  max_tokens: number | null;
+  api_key_masked: string | null;
 }
 
-export interface SettingsStatus {
-  llm: ConfigStatus;
-  embedding: ConfigStatus;
-  email: ConfigStatus;
+/** Mirrors backend EmbeddingConfigResponse (GET /api/settings/embedding). */
+export interface EmbeddingConfig {
+  configured: boolean;
+  provider_name: string | null;
+  base_url: string | null;
+  model: string | null;
+  dimension: number | null;
+  api_key_masked: string | null;
 }
+
+/** Mirrors backend EmailConfigResponse (GET /api/settings/email). */
+export interface EmailConfig {
+  configured: boolean;
+  provider: string | null;
+  email_address: string | null;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  has_password: boolean;
+}
+
+export type SettingsSection = "llm" | "embedding" | "email";

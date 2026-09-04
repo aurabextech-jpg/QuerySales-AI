@@ -61,10 +61,11 @@ npm run dev                  # → http://localhost:3000
 6. Open **Agent Runs →** the finished run to inspect every phase, tool call
    (including the actual knowledge retrieved) and the outreach draft
 
-> **Live agent analysis requires LLM + embedding keys.** Configure them once
-> under **Settings** (per-user, AES-256-GCM encrypted) and use **Test
-> Connection**; then process the knowledge documents so they get embedded.
-> Until then, leads/knowledge/runs all work — only the agent run needs keys.
+> **Live agent analysis requires LLM + embedding keys.** Each user configures
+> their own providers under **Settings** (stored server-side, AES-256-GCM
+> encrypted, only ever shown masked) — save, then use **Test connection**;
+> then process the knowledge documents so they get embedded. Until then,
+> leads/knowledge/runs all work — only the agent run needs keys.
 
 ## Screens
 
@@ -77,7 +78,7 @@ npm run dev                  # → http://localhost:3000
 | `/knowledge`  | Upload / delete knowledge documents, ingestion status                |
 | `/runs`       | Agent run history                                                    |
 | `/runs/[id]`  | Run detail — expandable phase timeline, tool calls, outreach drafts  |
-| `/settings`   | LLM / embedding / email configuration status and connection tests   |
+| `/settings`   | Per-user LLM / embedding / email configuration: save, test, remove  |
 
 ## Architecture notes
 
