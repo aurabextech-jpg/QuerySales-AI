@@ -95,7 +95,7 @@ async def validation_exception_handler(
 async def health_check():
     return {"status": "healthy"}
 
-from api.endpoints import chat, runs, logs, dashboard, calendar, pages, settings as settings_ep, knowledge as knowledge_ep
+from api.endpoints import chat, runs, logs, dashboard, calendar, pages, settings as settings_ep, knowledge as knowledge_ep, leads as leads_ep
 
 app.include_router(pages.router, tags=["legal"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
@@ -105,6 +105,7 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"]
 app.include_router(calendar.router, prefix="/api/calendar", tags=["calendar"])
 app.include_router(settings_ep.router, prefix="/api/settings", tags=["settings"])
 app.include_router(knowledge_ep.router, prefix="/api/knowledge", tags=["knowledge"])
+app.include_router(leads_ep.router, prefix="/api/leads", tags=["leads"])
 
 
 if __name__ == "__main__":

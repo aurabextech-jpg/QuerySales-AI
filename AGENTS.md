@@ -326,7 +326,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | 2 | Per-user config, crypto & settings API | ✅ Complete | [phase-2-user-config.md](summery/phase-2-user-config.md) |
 | 3 | RAG pipeline & knowledge API | ✅ Complete | [phase-3-rag-pipeline.md](summery/phase-3-rag-pipeline.md) |
 | 4 | Autonomous sales agent & tools | ✅ Complete | [phase-4-sales-agent.md](summery/phase-4-sales-agent.md) |
-| 5 | Leads, analyze & run/trace APIs | ⬜ Not started | — |
+| 5 | Leads, analyze & run/trace APIs | ✅ Complete | [phase-5-leads-runs-api.md](summery/phase-5-leads-runs-api.md) |
 | 6 | Demo seed data | ⬜ Not started | — |
 | 7 | Next.js scaffold, auth & app shell | ⬜ Not started | — |
 | 8 | Dashboard, leads & live analysis UI | ⬜ Not started | — |

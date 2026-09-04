@@ -25,6 +25,9 @@ from db.models import (
     AuditTrace,
     ToolCallLog,
     ChatMessageLog,
+    Lead,
+    KnowledgeDocument,
+    OutreachDraft,
 )
 from db.session import get_db
 from mcp_tools.erpnext import analyze_crm_data, AnalyzeCrmInput
@@ -36,13 +39,19 @@ router = APIRouter()
 # ── Response models ──────────────────────────────────────────────────────
 
 class PipelineStats(BaseModel):
-    """Lead pipeline breakdown from ERPNext."""
+    """Lead pipeline breakdown from local DB."""
     total_leads: int = 0
-    open: int = 0
-    replied: int = 0
-    opportunity: int = 0
-    converted: int = 0
-    do_not_contact: int = 0
+    new: int = 0
+    analyzing: int = 0
+    qualified: int = 0
+    nurture: int = 0
+    disqualified: int = 0
+    contacted: int = 0
+    # Legacy ERPNext fields (optional extra)
+    erpnext_open: int = 0
+    erpnext_replied: int = 0
+    erpnext_opportunity: int = 0
+    erpnext_converted: int = 0
 
 
 class AgentUsageStats(BaseModel):
@@ -67,6 +76,8 @@ class DashboardResponse(BaseModel):
     pipeline: PipelineStats
     usage: AgentUsageStats
     recent_activity: list[RecentActivity]
+    knowledge_documents: int = 0
+    outreach_drafts: int = 0
     categorized_leads: dict = {}
     raw_leads: list = []
 
@@ -155,6 +166,41 @@ async def _fetch_recent_leads() -> tuple[dict, list]:
     except Exception as exc:
         logger.error("ERPNext recent leads fetch failed: %s", exc)
         return {}, []
+
+
+# ── Local pipeline stats ─────────────────────────────────────────────
+
+
+async def _fetch_local_pipeline(user_id: str, db: AsyncSession) -> PipelineStats:
+    """Compute lead pipeline from local user-scoped data."""
+    result = await db.execute(
+        select(Lead.status, func.count(Lead.id))
+        .where(Lead.user_id == user_id)
+        .group_by(Lead.status)
+    )
+    status_counts = {row[0]: row[1] for row in result.fetchall()}
+    total = sum(status_counts.values())
+
+    # ERPNext is optional — try but never block
+    erpnext = PipelineStats()
+    try:
+        erpnext = await _fetch_erpnext_pipeline()
+    except Exception:
+        pass
+
+    return PipelineStats(
+        total_leads=total,
+        new=status_counts.get("New", 0),
+        analyzing=status_counts.get("Analyzing", 0),
+        qualified=status_counts.get("Qualified", 0),
+        nurture=status_counts.get("Nurture", 0),
+        disqualified=status_counts.get("Disqualified", 0),
+        contacted=status_counts.get("Contacted", 0),
+        erpnext_open=erpnext.erpnext_open,
+        erpnext_replied=erpnext.erpnext_replied,
+        erpnext_opportunity=erpnext.erpnext_opportunity,
+        erpnext_converted=erpnext.erpnext_converted,
+    )
 
 
 # ── Local DB helpers ─────────────────────────────────────────────────────
@@ -272,15 +318,37 @@ async def get_dashboard_stats(
 ):
     """Return full dashboard data: ERP pipeline + local usage + recent activity."""
     try:
-        pipeline = await _fetch_erpnext_pipeline()
+        pipeline = await _fetch_local_pipeline(current_user.id, db)
         usage = await _fetch_usage_stats(current_user.id, db)
         activity = await _fetch_recent_activity(current_user.id, db)
-        categorized_leads, raw_leads = await _fetch_recent_leads()
+
+        # Knowledge document count
+        kd_result = await db.execute(
+            select(func.count(KnowledgeDocument.id))
+            .where(KnowledgeDocument.user_id == current_user.id)
+        )
+        knowledge_count = kd_result.scalar() or 0
+
+        # Outreach drafts count
+        od_result = await db.execute(
+            select(func.count(OutreachDraft.id))
+            .where(OutreachDraft.user_id == current_user.id)
+        )
+        outreach_count = od_result.scalar() or 0
+
+        # ERPNext leads are optional
+        categorized_leads, raw_leads = {}, []
+        try:
+            categorized_leads, raw_leads = await _fetch_recent_leads()
+        except Exception:
+            pass
 
         return DashboardResponse(
             pipeline=pipeline,
             usage=usage,
             recent_activity=activity,
+            knowledge_documents=knowledge_count,
+            outreach_drafts=outreach_count,
             categorized_leads=categorized_leads,
             raw_leads=raw_leads,
         )

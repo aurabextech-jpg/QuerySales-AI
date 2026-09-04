@@ -1,15 +1,15 @@
-"""Workflow run endpoints — create, list, and get runs for the logged-in user."""
+"""Workflow run endpoints — create, list, get runs + events for the logged-in user."""
 
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import get_current_user
-from db.models import User, WorkflowRun, ToolCallLog, AuditTrace
+from db.models import User, WorkflowRun, ToolCallLog, AuditTrace, AgentEvent, Lead
 from db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,10 @@ class WorkflowRunResponse(BaseModel):
     mode: str
     workflow_type: str
     created_at: datetime | None = None
+    # Phase 5 additions
+    lead_id: str | None = None
+    final_result: dict | None = None
+    completed_at: datetime | None = None
 
 
 class WorkflowRunSummary(BaseModel):
@@ -42,6 +46,12 @@ class WorkflowRunSummary(BaseModel):
     created_at: datetime | None = None
     tool_call_count: int = 0
     trace_count: int = 0
+    # Phase 5 additions
+    lead_id: str | None = None
+    lead_company: str | None = None
+    score: int | None = None
+    qualification: str | None = None
+    completed_at: datetime | None = None
 
 
 # ── POST /api/runs — create a new run ────────────────────────────────────
@@ -120,7 +130,23 @@ async def list_runs(
                 created_at=run.created_at,
                 tool_call_count=tool_count,
                 trace_count=trace_count,
+                lead_id=run.lead_id,
+                lead_company=None,  # populated below
+                score=(run.final_result or {}).get("lead_score"),
+                qualification=(run.final_result or {}).get("qualification"),
+                completed_at=run.completed_at,
             ))
+
+        # Populate lead company for runs that have a lead_id
+        lead_ids = {s.lead_id for s in summaries if s.lead_id}
+        if lead_ids:
+            leads_result = await db.execute(
+                select(Lead).where(Lead.id.in_(lead_ids))
+            )
+            lead_map = {l.id: l.company for l in leads_result.scalars().all()}
+            for s in summaries:
+                if s.lead_id:
+                    s.lead_company = lead_map.get(s.lead_id)
 
         return summaries
     except HTTPException:
@@ -161,3 +187,58 @@ async def get_run(
             status_code=500,
             detail="Failed to retrieve workflow run.",
         )
+
+
+# ── GET /api/runs/{run_id}/events — phase timeline (Decision D6) ─────────
+
+
+class AgentEventResponse(BaseModel):
+    id: str
+    phase: str
+    title: str
+    detail: str | None = None
+    payload: dict | None = None
+    sequence: int
+    created_at: datetime | None = None
+
+
+@router.get("/{run_id}/events", response_model=list[AgentEventResponse])
+async def get_run_events(
+    run_id: str,
+    after_sequence: int = Query(0, ge=0, description="Only return events after this sequence"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get the ordered phase events for a run. Supports incremental polling."""
+    # Verify ownership
+    run_result = await db.execute(
+        select(WorkflowRun).where(
+            WorkflowRun.id == run_id,
+            WorkflowRun.user_id == current_user.id,
+        )
+    )
+    if not run_result.scalars().first():
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    result = await db.execute(
+        select(AgentEvent)
+        .where(
+            AgentEvent.run_id == run_id,
+            AgentEvent.user_id == current_user.id,
+            AgentEvent.sequence > after_sequence,
+        )
+        .order_by(AgentEvent.sequence.asc())
+    )
+    events = result.scalars().all()
+    return [
+        AgentEventResponse(
+            id=e.id,
+            phase=e.phase,
+            title=e.title,
+            detail=e.detail,
+            payload=e.payload,
+            sequence=e.sequence,
+            created_at=e.created_at,
+        )
+        for e in events
+    ]
