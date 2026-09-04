@@ -3,7 +3,7 @@
 Required by [plan.md](../plan.md) §35. This is the audit of what the repository already contains,
 decided against what QuerySales AI needs. Consult it before writing any new module.
 
-Audit date: **2026-09-04** · Repo: `AISeekho-challenge` (not under git)
+Audit date: **2026-09-04** · Repo: [`aurabextech-jpg/QuerySales-AI`](https://github.com/aurabextech-jpg/QuerySales-AI)
 
 Legend — **REUSE**: use as-is · **ADAPT**: extend in place · **BUILD**: does not exist
 

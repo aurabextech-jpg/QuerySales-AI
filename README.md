@@ -134,54 +134,65 @@ Why this design:
 
 ## Architecture
 
-```text
-                        ┌──────────────────────┐
-                        │     Next.js Web      │
-                        │      Dashboard       │
-                        └──────────┬───────────┘
-                                   │  authenticated request (Neon Auth JWT,
-                                   │  attached server-side from an httpOnly cookie)
-                                   ▼
-                        ┌──────────────────────┐
-                        │       FastAPI        │
-                        │  Auth / User Context │
-                        └──────────┬───────────┘
-                                   │  authenticated user_id
-                 ┌─────────────────┼──────────────────┐
-                 ▼                 ▼                  ▼
-          ┌─────────────┐   ┌─────────────┐   ┌──────────────┐
-          │ User Config │   │  User RAG   │   │  User Agent  │
-          │             │   │             │   │              │
-          │ LLM         │   │ Documents   │   │ Runs         │
-          │ Embeddings  │   │ Chunks      │   │ Tools        │
-          │ Email       │   │ Vectors     │   │ Outreach     │
-          └──────┬──────┘   └──────┬──────┘   └──────┬───────┘
-                 └─────────────────┼──────────────────┘
-                                   ▼
-                        ┌──────────────────────┐
-                        │  Neon PostgreSQL     │
-                        │  + pgvector          │
-                        │                      │
-                        │  User-scoped rows    │
-                        │  Encrypted secrets   │
-                        └──────────────────────┘
+```mermaid
+flowchart TD
+    User(["User"]) --> Web
+
+    subgraph web ["Next.js Dashboard"]
+        Web["Server Components<br/>and Route Handlers"]
+    end
+
+    Web -- "Bearer JWT attached server-side" --> Auth
+
+    subgraph api ["FastAPI Backend"]
+        Auth["Auth / User Context<br/><i>verifies Neon Auth JWT via JWKS</i>"]
+        Config["User Config<br/>LLM · Embeddings · Email"]
+        RAG["RAG Engine<br/>Extract · Chunk · Embed · Search"]
+        Agent["Sales Agent<br/>Runs · Tools · Outreach"]
+    end
+
+    Auth -- "authenticated user_id" --> Config
+    Auth -- "authenticated user_id" --> RAG
+    Auth -- "authenticated user_id" --> Agent
+
+    Config --> DB
+    RAG --> DB
+    Agent --> DB
+
+    DB[("Neon PostgreSQL + pgvector<br/>user-scoped rows · encrypted secrets")]
+
+    classDef accent fill:#C3F53C,stroke:#8FBF14,stroke-width:1px,color:#0B0C0A
+    classDef store fill:#4D7C0F,stroke:#3C610C,stroke-width:1px,color:#F0F2EC
+    class Agent accent
+    class DB store
 ```
 
 **The browser never talks to FastAPI directly.** The session JWT lives in an httpOnly cookie;
 Next.js server components and route handlers attach it as a Bearer token server-side. That
 keeps the token out of browser JavaScript and gives one place to handle 401s.
 
-**The agent loop**
+### The agent loop
 
-```text
-OBSERVE   →  understand the lead
-RETRIEVE  →  search_knowledge(...)  ← the agent decides when
-REASON    →  evaluate product fit against retrieved evidence
-PLAN      →  determine the sales action
-ACT       →  update_lead(...) · draft_outreach(...)
-RESULT    →  structured output + persisted trace
-COMPLETE
+```mermaid
+flowchart LR
+    OBSERVE["OBSERVE<br/><i>understand the lead</i>"]
+    RETRIEVE["RETRIEVE<br/><i>search_knowledge</i>"]
+    REASON["REASON<br/><i>evaluate product fit</i>"]
+    PLAN["PLAN<br/><i>decide the sales action</i>"]
+    ACT["ACT<br/><i>update_lead · draft_outreach</i>"]
+    RESULT["RESULT<br/><i>structured output + trace</i>"]
+    COMPLETE(["COMPLETE"])
+
+    OBSERVE --> RETRIEVE --> REASON --> PLAN --> ACT --> RESULT --> COMPLETE
+    REASON -. "needs more evidence" .-> RETRIEVE
+
+    classDef accent fill:#C3F53C,stroke:#8FBF14,stroke-width:1px,color:#0B0C0A
+    class RETRIEVE,COMPLETE accent
 ```
+
+The dotted edge is the point: **the agent decides when it needs knowledge.** Retrieval is a tool
+it chooses to call, not a preprocessing step wired ahead of the model — and it can go back for
+more before committing to a plan.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -210,8 +221,8 @@ COMPLETE
 1. **Clone the repository**
 
    ```sh
-   git clone https://github.com/your_username/AISeekho-challenge.git
-   cd AISeekho-challenge
+   git clone https://github.com/aurabextech-jpg/QuerySales-AI.git
+   cd QuerySales-AI
    ```
 
 2. **Enable pgvector on your database**
@@ -430,7 +441,7 @@ Requesting another user's record returns **404**, never their data.
 ## Project Structure
 
 ```text
-AISeekho-challenge/
+QuerySales-AI/
 ├── salesops-agent-backend/       # FastAPI + OpenAI Agents SDK
 │   ├── agent_core/
 │   │   ├── sales_agent.py        #   the autonomous lead analyst
@@ -613,7 +624,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- MARKDOWN LINKS & IMAGES -->
-[issues-url]: https://github.com/your_username/AISeekho-challenge/issues
+[issues-url]: https://github.com/aurabextech-jpg/QuerySales-AI/issues
 [license-shield]: https://img.shields.io/badge/License-MIT-C3F53C?style=for-the-badge
 [python-shield]: https://img.shields.io/badge/Python-3.13+-3776AB?style=for-the-badge&logo=python&logoColor=white
 [python-url]: https://python.org

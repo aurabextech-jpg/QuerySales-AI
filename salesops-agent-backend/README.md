@@ -218,8 +218,8 @@ Ensure the following are installed on your system:
 
 1. **Clone the repository**
    ```sh
-   git clone https://github.com/Sheikh-Muhammad-Mujtaba/AISeekho-challenge.git
-   cd AISeekho-challenge/salesops-agent-backend
+   git clone https://github.com/aurabextech-jpg/QuerySales-AI.git
+   cd QuerySales-AI/salesops-agent-backend
    ```
 
 2. **Create and activate a virtual environment**
@@ -370,7 +370,7 @@ To comply with **Google OAuth consent screen** requirements, the backend serves 
 - [ ] Rate limiting and API throttling
 - [ ] Observability dashboards (OpenTelemetry)
 
-See the [open issues](https://github.com/Sheikh-Muhammad-Mujtaba/AISeekho-challenge/issues) for a full list of proposed features and known issues.
+See the [open issues](https://github.com/aurabextech-jpg/QuerySales-AI/issues) for a full list of proposed features and known issues.
 
 ---
 
@@ -399,7 +399,7 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 
 **Muhammad Mujtaba** — [@Sheikh-Muhammad-Mujtaba](https://github.com/Sheikh-Muhammad-Mujtaba)
 
-Project Link: [https://github.com/Sheikh-Muhammad-Mujtaba/AISeekho-challenge](https://github.com/Sheikh-Muhammad-Mujtaba/AISeekho-challenge)
+Project Link: [https://github.com/aurabextech-jpg/QuerySales-AI](https://github.com/aurabextech-jpg/QuerySales-AI)
 
 ---
 

@@ -29,7 +29,7 @@ not for production scale.**
 ## 2. Repository map
 
 ```text
-AISeekho-challenge/
+QuerySales-AI/
 ├── AGENTS.md                    ← you are here (authority + memory)
 ├── plan.md                      ← the product specification (do not edit)
 ├── README.md                    ← public project README (legacy: describes the RN-era system)
