@@ -192,3 +192,37 @@ export interface EmailConfig {
 }
 
 export type SettingsSection = "llm" | "embedding" | "email";
+
+/* ── Third-party integrations ──────────────────────────────────────── */
+
+/** One configurable field, described by the backend registry. */
+export interface IntegrationField {
+  name: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+  placeholder: string;
+  help: string;
+}
+
+/**
+ * Mirrors backend IntegrationResponse. `values` holds non-secret fields only;
+ * secrets appear in `masked` and are never sent to the browser in full.
+ */
+export interface Integration {
+  provider: string;
+  label: string;
+  description: string;
+  configured: boolean;
+  enabled: boolean;
+  /** Where the active credentials come from — the user's row or env fallback. */
+  source: "user" | "env" | null;
+  fields: IntegrationField[];
+  values: Record<string, string>;
+  masked: Record<string, string>;
+}
+
+export interface TestResult {
+  success: boolean;
+  message: string;
+}

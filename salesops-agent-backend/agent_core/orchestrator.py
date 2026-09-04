@@ -82,8 +82,18 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentContext:
+    """Per-run context threaded to every tool via RunContextWrapper.
+
+    The integration fields carry the authenticated user's own credentials
+    (core.user_config.ResolvedIntegration). When one is None the tool falls
+    back to the optional system-level env vars.
+    """
+
     run_id: str
     google_refresh_token: str | None = None
+    erpnext: object | None = None
+    google_places: object | None = None
+    google_calendar: object | None = None
 
 
 # ── Tool wrappers ────────────────────────────────────────────────────────
@@ -112,32 +122,37 @@ async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -
         if tool_name in ["check_availability", "create_event"] and context:
             arguments["refresh_token"] = context.google_refresh_token
 
+        # Per-user credentials for the provider this tool belongs to.
+        erp = context.erpnext if context else None
+        places = context.google_places if context else None
+        calendar = context.google_calendar if context else None
+
         match tool_name:
             case "create_erpnext_lead":
-                return await create_erpnext_lead(CreateLeadInput(**arguments))
+                return await create_erpnext_lead(CreateLeadInput(**arguments), erp)
             case "read_erpnext_lead":
-                return await read_erpnext_lead(ReadLeadInput(**arguments))
+                return await read_erpnext_lead(ReadLeadInput(**arguments), erp)
             case "update_erpnext_lead":
-                return await update_erpnext_lead(UpdateLeadInput(**arguments))
+                return await update_erpnext_lead(UpdateLeadInput(**arguments), erp)
             case "analyze_crm_data":
-                return await analyze_crm_data(AnalyzeCrmInput(**arguments))
+                return await analyze_crm_data(AnalyzeCrmInput(**arguments), erp)
             case "get_chatbot_link":
-                return await get_chatbot_link(arguments["lead_id"])
+                return await get_chatbot_link(arguments["lead_id"], erp)
             case "send_email":
                 return await send_email(
                     arguments["to_email"], arguments["subject"],
                     arguments["body"],
                 )
             case "search_businesses":
-                return await search_businesses(SearchBusinessesInput(**arguments))
+                return await search_businesses(SearchBusinessesInput(**arguments), places)
             case "search_leads_multi":
-                return await search_leads_multi(SearchLeadsMultiInput(**arguments))
+                return await search_leads_multi(SearchLeadsMultiInput(**arguments), places)
             case "get_place_details":
-                return await get_place_details(GetPlaceDetailsInput(**arguments))
+                return await get_place_details(GetPlaceDetailsInput(**arguments), places)
             case "check_availability":
-                return await check_availability(CheckAvailabilityInput(**arguments))
+                return await check_availability(CheckAvailabilityInput(**arguments), calendar)
             case "create_event":
-                return await create_event(CreateEventInput(**arguments))
+                return await create_event(CreateEventInput(**arguments), calendar)
             case _:
                 return {"error": f"Unknown tool: {tool_name}"}
     except Exception as exc:
@@ -564,13 +579,18 @@ async def run_orchestrator(
     *,
     run_id: str | None = None,
     google_refresh_token: str | None = None,
+    integrations: dict | None = None,
 ) -> str:
     """Run the agent orchestration loop (non-streaming)."""
     token = current_run_id.set(run_id)
+    creds = integrations or {}
     try:
         context = AgentContext(
             run_id=run_id or "",
-            google_refresh_token=google_refresh_token
+            google_refresh_token=google_refresh_token,
+            erpnext=creds.get("erpnext"),
+            google_places=creds.get("google_places"),
+            google_calendar=creds.get("google_calendar"),
         )
         result = await Runner.run(
             starting_agent=orchestrator_agent,
@@ -603,6 +623,7 @@ async def run_orchestrator_with_events(
     *,
     run_id: str | None = None,
     google_refresh_token: str | None = None,
+    integrations: dict | None = None,
 ) -> dict:
     """Run the agent loop and collect all events into a structured response.
 
@@ -622,11 +643,15 @@ async def run_orchestrator_with_events(
     token = current_run_id.set(run_id)
     steps: list[dict] = []
     current_tool_name = "unknown"
+    creds = integrations or {}
 
     try:
         context = AgentContext(
             run_id=run_id or "",
             google_refresh_token=google_refresh_token,
+            erpnext=creds.get("erpnext"),
+            google_places=creds.get("google_places"),
+            google_calendar=creds.get("google_calendar"),
         )
         result = Runner.run_streamed(
             starting_agent=orchestrator_agent,

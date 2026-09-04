@@ -6,6 +6,7 @@ Secrets are encrypted at rest (AES-256-GCM) and never returned in responses.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -18,11 +19,19 @@ from sqlalchemy.future import select
 from core.config import settings
 from core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from core.security import get_current_user
-from core.user_config import ConfigurationMissing, resolve_llm_config, resolve_embedding_config
+from core.integrations import PROVIDERS, IntegrationSpec, get_spec
+from core.user_config import (
+    ConfigurationMissing,
+    ResolvedIntegration,
+    resolve_embedding_config,
+    resolve_integration_config,
+    resolve_llm_config,
+)
 from db.models import (
     User,
     UserEmailConfig,
     UserEmbeddingConfig,
+    UserIntegrationConfig,
     UserLLMConfig,
 )
 from db.session import get_db
@@ -503,3 +512,274 @@ async def get_database_status(
         pass
 
     return DatabaseStatus(postgres=pg_status, pgvector=pv_status)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Third-party integrations (plan §41) — ERPNext · Google Places · Calendar
+#
+#  One generic set of endpoints serves every provider; the field set comes from
+#  the registry in core/integrations.py.  Secrets are AES-256-GCM encrypted and
+#  only ever returned masked (plan §47).
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class IntegrationFieldSchema(BaseModel):
+    """Describes one field so the settings UI can render it generically."""
+
+    name: str
+    label: str
+    secret: bool
+    required: bool
+    placeholder: str = ""
+    help: str = ""
+
+
+class IntegrationResponse(BaseModel):
+    provider: str
+    label: str
+    description: str
+    configured: bool
+    enabled: bool = True
+    # "user" · "env" · None — where the active credentials come from
+    source: Optional[str] = None
+    fields: list[IntegrationFieldSchema] = []
+    # Non-secret values only.  Secrets appear in `masked` instead.
+    values: dict[str, str] = {}
+    masked: dict[str, str] = {}
+
+
+class IntegrationUpdate(BaseModel):
+    """Field values to save.  Omit a secret to keep the stored one."""
+
+    enabled: bool = True
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+def _integration_payload(
+    spec: IntegrationSpec,
+    row: Optional[UserIntegrationConfig],
+    resolved: Optional[ResolvedIntegration],
+) -> IntegrationResponse:
+    """Build the response for one provider — never including a raw secret."""
+    public: dict[str, str] = {}
+    masked: dict[str, str] = {}
+
+    if row:
+        public = {
+            k: v for k, v in (row.config or {}).items() if k in spec.public_fields and v
+        }
+
+    if resolved:
+        # Show env-sourced public values too, so the UI can explain where the
+        # active credentials come from.
+        for name in spec.public_fields:
+            if name not in public and resolved.values.get(name):
+                public[name] = resolved.values[name]
+        for name in spec.secret_fields:
+            if resolved.values.get(name):
+                masked[name] = mask_secret(resolved.values[name])
+
+    return IntegrationResponse(
+        provider=spec.provider,
+        label=spec.label,
+        description=spec.description,
+        configured=bool(resolved and resolved.complete),
+        enabled=row.enabled if row else True,
+        source=resolved.source if resolved else None,
+        fields=[
+            IntegrationFieldSchema(
+                name=f.name,
+                label=f.label,
+                secret=f.secret,
+                required=f.required,
+                placeholder=f.placeholder,
+                help=f.help,
+            )
+            for f in spec.fields
+        ],
+        values=public,
+        masked=masked,
+    )
+
+
+async def _get_integration_row(
+    user_id: str, provider: str, db: AsyncSession
+) -> Optional[UserIntegrationConfig]:
+    result = await db.execute(
+        select(UserIntegrationConfig).where(
+            UserIntegrationConfig.user_id == user_id,
+            UserIntegrationConfig.provider == provider,
+        )
+    )
+    return result.scalars().first()
+
+
+def _require_spec(provider: str) -> IntegrationSpec:
+    try:
+        return get_spec(provider)
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown integration: {provider}"
+        )
+
+
+def _label_for(spec: IntegrationSpec, name: str) -> str:
+    return next((f.label for f in spec.fields if f.name == name), name)
+
+
+@router.get("/integrations", response_model=list[IntegrationResponse])
+async def list_integrations(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every supported integration with this user's configuration status."""
+    out: list[IntegrationResponse] = []
+    for provider in PROVIDERS:
+        spec = get_spec(provider)
+        row = await _get_integration_row(user.id, provider, db)
+        resolved = await resolve_integration_config(user.id, provider, db)
+        out.append(_integration_payload(spec, row, resolved))
+    return out
+
+
+@router.get("/integrations/{provider}", response_model=IntegrationResponse)
+async def get_integration(
+    provider: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    spec = _require_spec(provider)
+    row = await _get_integration_row(user.id, provider, db)
+    resolved = await resolve_integration_config(user.id, provider, db)
+    return _integration_payload(spec, row, resolved)
+
+
+@router.put("/integrations/{provider}", response_model=IntegrationResponse)
+async def put_integration(
+    provider: str,
+    body: IntegrationUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save one provider's configuration.
+
+    Secrets are merged: a field omitted (or sent empty) keeps its stored value,
+    so the UI never has to round-trip a secret just to preserve it.
+    """
+    spec = _require_spec(provider)
+    row = await _get_integration_row(user.id, provider, db)
+
+    unknown = set(body.values) - {f.name for f in spec.fields}
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown field(s): " + ", ".join(sorted(unknown)),
+        )
+
+    public = {
+        name: (body.values.get(name) or "").strip()
+        for name in spec.public_fields
+        if name in body.values
+    }
+    merged_public = {**(row.config or {}), **public} if row else public
+
+    # Merge secrets over whatever is already stored.
+    existing_secrets: dict[str, str] = {}
+    if row and row.secrets_encrypted:
+        try:
+            existing_secrets = json.loads(decrypt_secret(row.secrets_encrypted))
+        except Exception:
+            logger.warning(
+                "Discarding undecryptable %s secrets for user %s", provider, user.id
+            )
+    incoming_secrets = {
+        name: body.values[name].strip()
+        for name in spec.secret_fields
+        if body.values.get(name, "").strip()
+    }
+    merged_secrets = {**existing_secrets, **incoming_secrets}
+
+    missing = [
+        name
+        for name in spec.required_fields
+        if not (merged_public.get(name) or merged_secrets.get(name))
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required field(s): "
+            + ", ".join(_label_for(spec, name) for name in missing),
+        )
+
+    blob = encrypt_secret(json.dumps(merged_secrets)) if merged_secrets else None
+
+    if row:
+        row.config = merged_public
+        row.secrets_encrypted = blob
+        row.enabled = body.enabled
+    else:
+        row = UserIntegrationConfig(
+            user_id=user.id,
+            provider=provider,
+            config=merged_public,
+            secrets_encrypted=blob,
+            enabled=body.enabled,
+        )
+        db.add(row)
+
+    await db.commit()
+    await db.refresh(row)
+
+    resolved = await resolve_integration_config(user.id, provider, db)
+    return _integration_payload(spec, row, resolved)
+
+
+@router.post("/integrations/{provider}/test", response_model=TestResult)
+async def test_integration(
+    provider: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify credentials against the live provider. Returns success/failure only."""
+    spec = _require_spec(provider)
+    resolved = await resolve_integration_config(user.id, provider, db)
+
+    if not resolved or not resolved.complete:
+        return TestResult(success=False, message=f"{spec.label} is not configured.")
+
+    try:
+        if provider == "erpnext":
+            from mcp_tools.erpnext import ping_erpnext
+
+            return TestResult(**await ping_erpnext(resolved))
+        if provider == "google_places":
+            from mcp_tools.google_places import ping_places
+
+            return TestResult(**await ping_places(resolved))
+        if provider == "google_calendar":
+            from mcp_tools.google_calendar import ping_calendar
+
+            return TestResult(**await ping_calendar(resolved))
+    except Exception as exc:
+        # Provider errors can embed hostnames and tokens — log server-side and
+        # return only the exception type (plan §31, §56).
+        logger.warning("%s test failed for user %s: %s", provider, user.id, exc)
+        return TestResult(
+            success=False, message=f"Connection failed: {type(exc).__name__}"
+        )
+
+    return TestResult(success=False, message="No test available for this provider.")
+
+
+@router.delete("/integrations/{provider}")
+async def delete_integration(
+    provider: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _require_spec(provider)
+    row = await _get_integration_row(user.id, provider, db)
+    if row:
+        await db.delete(row)
+        await db.commit()
+    return {"deleted": True}

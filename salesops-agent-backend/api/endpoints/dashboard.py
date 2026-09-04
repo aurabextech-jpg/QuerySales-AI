@@ -30,6 +30,7 @@ from db.models import (
     OutreachDraft,
 )
 from db.session import get_db
+from core.user_config import resolve_integration_config
 from mcp_tools.erpnext import analyze_crm_data, AnalyzeCrmInput
 
 logger = logging.getLogger(__name__)
@@ -84,19 +85,25 @@ class DashboardResponse(BaseModel):
 
 # ── ERPNext helpers ──────────────────────────────────────────────────────
 
-async def _fetch_erpnext_pipeline() -> PipelineStats:
-    """Fetch lead status counts directly from ERPNext API."""
-    if not settings.ERPNEXT_BASE_URL or not settings.ERPNEXT_API_TOKEN:
-        logger.warning("ERPNext not configured — returning empty pipeline stats.")
+async def _fetch_erpnext_pipeline(creds=None) -> PipelineStats:
+    """Fetch lead status counts from the caller's own ERPNext instance.
+
+    ERPNext is optional and must never block the dashboard (Decision D5):
+    an unconfigured or unreachable instance yields empty stats.
+    """
+    base_url = creds.get("base_url") if creds else settings.ERPNEXT_BASE_URL
+    token = creds.get("api_token") if creds else settings.ERPNEXT_API_TOKEN
+
+    if not base_url or not token:
         return PipelineStats()
 
-    headers = {"Authorization": f"token {settings.ERPNEXT_API_TOKEN}"}
+    headers = {"Authorization": f"token {token}"}
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             # Fetch all leads with status field
             response = await client.get(
-                f"{settings.ERPNEXT_BASE_URL}/api/resource/Lead",
+                f"{base_url}/api/resource/Lead",
                 params={
                     "fields": '["name","status"]',
                     "limit_page_length": 0,  # 0 = all records
@@ -132,8 +139,8 @@ async def _fetch_erpnext_pipeline() -> PipelineStats:
         logger.error("ERPNext pipeline fetch failed: %s", exc)
         return PipelineStats()
 
-async def _fetch_recent_leads() -> tuple[dict, list]:
-    """Fetch recent leads and categorize them."""
+async def _fetch_recent_leads(creds=None) -> tuple[dict, list]:
+    """Fetch recent leads from the caller's ERPNext and categorize them."""
     try:
         input_data = AnalyzeCrmInput(
             doctype="Lead",
@@ -141,7 +148,7 @@ async def _fetch_recent_leads() -> tuple[dict, list]:
             limit=3,
             order_by="creation desc"
         )
-        response = await analyze_crm_data(input_data)
+        response = await analyze_crm_data(input_data, creds)
         if response.get("status") == "error":
             return {}, []
             
@@ -181,10 +188,11 @@ async def _fetch_local_pipeline(user_id: str, db: AsyncSession) -> PipelineStats
     status_counts = {row[0]: row[1] for row in result.fetchall()}
     total = sum(status_counts.values())
 
-    # ERPNext is optional — try but never block
+    # ERPNext is optional — try with this user's own credentials, never block
     erpnext = PipelineStats()
     try:
-        erpnext = await _fetch_erpnext_pipeline()
+        erp_creds = await resolve_integration_config(user_id, "erpnext", db)
+        erpnext = await _fetch_erpnext_pipeline(erp_creds)
     except Exception:
         pass
 
@@ -339,7 +347,10 @@ async def get_dashboard_stats(
         # ERPNext leads are optional
         categorized_leads, raw_leads = {}, []
         try:
-            categorized_leads, raw_leads = await _fetch_recent_leads()
+            erp_creds = await resolve_integration_config(
+                current_user.id, "erpnext", db
+            )
+            categorized_leads, raw_leads = await _fetch_recent_leads(erp_creds)
         except Exception:
             pass
 
@@ -369,6 +380,7 @@ async def get_paginated_leads(
     offset: int = 0,
     status: str | None = None,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Return paginated leads from ERPNext with optional status filtering."""
     try:
@@ -385,9 +397,10 @@ async def get_paginated_leads(
             filters=filters if filters else None,
         )
         
-        response = await analyze_crm_data(input_data)
+        erp_creds = await resolve_integration_config(current_user.id, "erpnext", db)
+        response = await analyze_crm_data(input_data, erp_creds)
         if response.get("status") == "error":
-            raise HTTPException(status_code=500, detail=response.get("message"))
+            raise HTTPException(status_code=502, detail=response.get("message"))
             
         records = response.get("data", [])
         return {

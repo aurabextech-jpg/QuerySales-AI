@@ -18,18 +18,42 @@ logger = logging.getLogger(__name__)
 # Auth Helper
 # ---------------------------------------------------------------------------
 
-async def get_access_token(refresh_token: Optional[str] = None) -> str:
-    """Fetch a fresh access token using the refresh token."""
-    # Fallback to settings if no token provided (backward compatibility)
-    rt = refresh_token or settings.GOOGLE_CALENDAR_REFRESH_TOKEN
-    
-    if not all([settings.GOOGLE_CALENDAR_CLIENT_ID, settings.GOOGLE_CALENDAR_CLIENT_SECRET, rt]):
-        raise ValueError("Google Calendar credentials are not fully configured. User must connect their calendar.")
-        
+def _calendar_creds(creds: Any = None) -> tuple[str, str, str]:
+    """Return (client_id, client_secret, refresh_token) for this user."""
+    if creds is not None:
+        return (
+            creds.get("client_id"),
+            creds.get("client_secret"),
+            creds.get("refresh_token"),
+        )
+    return (
+        settings.GOOGLE_CALENDAR_CLIENT_ID,
+        settings.GOOGLE_CALENDAR_CLIENT_SECRET,
+        settings.GOOGLE_CALENDAR_REFRESH_TOKEN,
+    )
+
+
+async def get_access_token(
+    refresh_token: Optional[str] = None, creds: Any = None
+) -> str:
+    """Fetch a fresh access token using the refresh token.
+
+    An explicit *refresh_token* wins: it comes from the user's own
+    Connect Calendar flow, which is the token they actually authorised.
+    """
+    client_id, client_secret, fallback_token = _calendar_creds(creds)
+    rt = refresh_token or fallback_token
+
+    if not all([client_id, client_secret, rt]):
+        raise ValueError(
+            "Google Calendar is not fully configured. Add the OAuth client in "
+            "Settings -> Integrations and connect your calendar."
+        )
+
     url = "https://oauth2.googleapis.com/token"
     payload = {
-        "client_id": settings.GOOGLE_CALENDAR_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CALENDAR_CLIENT_SECRET,
+        "client_id": client_id,
+        "client_secret": client_secret,
         "refresh_token": rt,
         "grant_type": "refresh_token",
     }
@@ -67,10 +91,12 @@ class CreateEventInput(BaseModel):
 # Tool implementations
 # ---------------------------------------------------------------------------
 
-async def check_availability(input_data: CheckAvailabilityInput) -> dict[str, Any]:
+async def check_availability(
+    input_data: CheckAvailabilityInput, creds: Any = None
+) -> dict[str, Any]:
     """Check calendar availability for a given date using Google FreeBusy API."""
     try:
-        access_token = await get_access_token(input_data.refresh_token)
+        access_token = await get_access_token(input_data.refresh_token, creds)
     except Exception as e:
         logger.error("Failed to get access token: %s", e)
         return {"status": "error", "message": str(e)}
@@ -131,10 +157,12 @@ async def check_availability(input_data: CheckAvailabilityInput) -> dict[str, An
             return {"status": "error", "message": f"Failed to check availability: {str(e)}"}
 
 
-async def create_event(input_data: CreateEventInput) -> dict[str, Any]:
+async def create_event(
+    input_data: CreateEventInput, creds: Any = None
+) -> dict[str, Any]:
     """Create a real Google Calendar event via the Calendar Events API."""
     try:
-        access_token = await get_access_token(input_data.refresh_token)
+        access_token = await get_access_token(input_data.refresh_token, creds)
     except Exception as e:
         logger.error("Failed to get access token: %s", e)
         return {"status": "error", "message": str(e)}
@@ -202,3 +230,21 @@ async def create_event(input_data: CreateEventInput) -> dict[str, Any]:
         except Exception as e:
             logger.error("Failed to create event: %s", e)
             return {"status": "error", "message": f"Failed to create event: {str(e)}"}
+
+
+async def ping_calendar(creds: Any = None) -> dict[str, Any]:
+    """Exchange the refresh token for an access token. Used by the settings test."""
+    try:
+        await get_access_token(None, creds)
+        return {"success": True, "message": "Google Calendar credentials are valid."}
+    except ValueError as exc:
+        return {"success": False, "message": str(exc)}
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (400, 401):
+            return {
+                "success": False,
+                "message": "Google rejected the credentials - check the client secret and refresh token.",
+            }
+        return {"success": False, "message": f"Google returned HTTP {exc.response.status_code}."}
+    except Exception as exc:
+        return {"success": False, "message": f"Connection failed: {type(exc).__name__}"}

@@ -73,6 +73,7 @@ class User(Base):
     llm_config = relationship("UserLLMConfig", back_populates="user", uselist=False, lazy="selectin")
     embedding_config = relationship("UserEmbeddingConfig", back_populates="user", uselist=False, lazy="selectin")
     email_config = relationship("UserEmailConfig", back_populates="user", uselist=False, lazy="selectin")
+    integrations = relationship("UserIntegrationConfig", back_populates="user", lazy="selectin")
 
 
 class WorkflowRun(Base):
@@ -370,3 +371,34 @@ class OutreachDraft(Base):
 
     lead = relationship("Lead", back_populates="outreach_drafts")
     run = relationship("WorkflowRun", back_populates="outreach_drafts")
+
+
+class UserIntegrationConfig(Base):
+    """Per-user third-party integration credentials (plan §41).
+
+    One generic table rather than one table per provider: the field set for
+    each provider is declared in ``core/integrations.py``, so adding an
+    integration needs no migration.
+
+    ``config`` holds the non-secret fields (base URLs, client IDs) as plain
+    JSON so the settings UI can display them. ``secrets_encrypted`` holds a
+    single AES-256-GCM blob containing a JSON object of every secret field for
+    that provider — one encrypt/decrypt per provider rather than per field.
+    """
+
+    __tablename__ = "user_integration_config"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_integration_provider"),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    # One of core.integrations.PROVIDERS — erpnext · google_places · google_calendar
+    provider = Column(String, nullable=False, index=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    config = Column(JSON, nullable=False, default=dict)
+    secrets_encrypted = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    user = relationship("User", back_populates="integrations")

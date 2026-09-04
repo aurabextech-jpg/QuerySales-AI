@@ -105,7 +105,7 @@ Why this design:
 | 🔍 | **Real RAG over pgvector** | Upload `.md` / `.txt` / `.pdf`; the pipeline extracts, cleans, chunks, embeds and indexes into Postgres with a `vector(1536)` column and an IVFFlat cosine index. |
 | 🛠️ | **Four agent tools** | `search_knowledge` · `get_lead` · `update_lead` · `draft_outreach`. Outreach is drafted, never auto-sent — a human approves. |
 | 📊 | **Live analysis timeline** | Watch the agent work in real time. Each phase streams in as it happens; every tool call and knowledge query is expandable. |
-| 🔐 | **Per-user everything** | Independent LLM, embedding and email configuration per account. AES-256-GCM at rest, key held outside the database. |
+| 🔐 | **Per-user everything** | LLM, embeddings, email, ERPNext, Google Places and Google Calendar — every credential configured from the UI, per account. AES-256-GCM at rest, key held outside the database. |
 | 🎨 | **Polished dashboard** | Next.js 16 + shadcn/ui + Tailwind v4, dark and light themes, a ⌘K command palette, and sortable/filterable tables everywhere. |
 | 🧾 | **Full audit trail** | Token counts, cost estimates, tool inputs/outputs and agent reasoning persisted per run. |
 
@@ -261,8 +261,14 @@ more before committing to a plan.
    | `NEON_AUTH_JWKS_URL` | ✅ | JWKS endpoint for JWT verification |
    | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` | ○ | Optional system fallback when a user has not configured their own |
    | `EMBEDDING_BASE_URL` · `EMBEDDING_API_KEY` · `EMBEDDING_MODEL` | ○ | Same, for embeddings |
-   | `ERPNEXT_BASE_URL` · `ERPNEXT_API_TOKEN` | ○ | Optional outbound CRM push |
-   | `GMAIL_USER` · `GMAIL_APP_PASSWORD` | ○ | Fallback SMTP; users can configure their own |
+   | `ERPNEXT_*` · `GOOGLE_PLACES_API_KEY` · `GOOGLE_CALENDAR_*` · `GMAIL_*` | ○ | Same, for the third-party integrations |
+
+   > [!NOTE]
+   > **Every credential above is optional.** LLM, embedding, email and all
+   > third-party integrations are configured per user from **Settings**, stored
+   > AES-256-GCM encrypted, and resolved at run time. These env vars exist only
+   > as a system-wide fallback for users who have not set up their own —
+   > leave them empty to require every user to bring their own credentials.
 
    API docs are then at **http://localhost:8000/docs**.
 
@@ -416,6 +422,26 @@ Requesting another user's record returns **404**, never their data.
 | `GET` `PUT` `DELETE` | `/api/settings/email` | SMTP / outreach configuration |
 | `POST` | `/api/settings/email/test` | Connect and authenticate without sending |
 | `GET` | `/api/settings/database` | Postgres and pgvector status — never the DSN |
+
+</details>
+
+<details>
+<summary><strong>Integrations</strong></summary>
+
+Third-party credentials are per user, AES-256-GCM encrypted, and configured
+entirely from **Settings → Integrations**. The field set for each provider comes
+from the backend registry (`core/integrations.py`), so the UI renders any
+provider without a frontend change.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/settings/integrations` | Every provider with this user's status and field schema |
+| `GET` | `/api/settings/integrations/{provider}` | One provider's configuration |
+| `PUT` | `/api/settings/integrations/{provider}` | Save it — an omitted secret keeps the stored value |
+| `POST` | `/api/settings/integrations/{provider}/test` | Verify against the live provider; returns success/failure only |
+| `DELETE` | `/api/settings/integrations/{provider}` | Remove the configuration |
+
+Providers: `erpnext` · `google_places` · `google_calendar`.
 
 </details>
 

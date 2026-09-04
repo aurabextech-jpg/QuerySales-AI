@@ -11,6 +11,7 @@ response boundary — they exist only for the duration of one request.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 
@@ -19,7 +20,14 @@ from sqlalchemy.future import select
 
 from core.config import settings
 from core.crypto import decrypt_secret
-from db.models import UserLLMConfig, UserEmbeddingConfig, UserEmailConfig
+from core.integrations import IntegrationSpec, env_defaults, get_spec
+from db.models import (
+    User,
+    UserEmailConfig,
+    UserEmbeddingConfig,
+    UserIntegrationConfig,
+    UserLLMConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,3 +189,124 @@ async def resolve_email_config(
         )
 
     return None
+
+
+# ── Third-party integrations (plan §41) ────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ResolvedIntegration:
+    """Decrypted credentials for one third-party provider.
+
+    ``values`` merges the stored public config with the decrypted secrets, so
+    callers read every field the same way. Never serialised into a response.
+    """
+
+    provider: str
+    values: dict[str, str]
+    source: str  # "user" | "env"
+
+    def get(self, name: str, default: str = "") -> str:
+        return self.values.get(name) or default
+
+    @property
+    def complete(self) -> bool:
+        """True when every required field for this provider has a value."""
+        spec = get_spec(self.provider)
+        return all(self.values.get(f) for f in spec.required_fields)
+
+
+def _decrypt_secrets(row: UserIntegrationConfig, spec: IntegrationSpec) -> dict[str, str]:
+    """Decrypt the provider's secret blob into a plain dict.
+
+    A blob that cannot be decrypted — key rotated, row corrupted — is treated
+    as "no secrets" rather than raising, so one bad row cannot take down every
+    settings page and agent run for that user.
+    """
+    if not row.secrets_encrypted:
+        return {}
+    try:
+        return {
+            k: v
+            for k, v in json.loads(decrypt_secret(row.secrets_encrypted)).items()
+            if k in spec.secret_fields and v
+        }
+    except Exception:
+        logger.warning(
+            "Could not decrypt %s secrets for user %s — treating as unconfigured",
+            row.provider,
+            row.user_id,
+        )
+        return {}
+
+
+async def resolve_integration_config(
+    user_id: str,
+    provider: str,
+    db: AsyncSession,
+) -> ResolvedIntegration | None:
+    """Resolve one integration for *user_id*.
+
+    Order: the user's row → optional env fallback → ``None``.
+
+    Returns ``None`` rather than raising: every integration here is optional
+    and must never block a response when unconfigured (Decision D5).
+    """
+    spec = get_spec(provider)
+
+    result = await db.execute(
+        select(UserIntegrationConfig).where(
+            UserIntegrationConfig.user_id == user_id,
+            UserIntegrationConfig.provider == provider,
+        )
+    )
+    row = result.scalars().first()
+
+    if row and row.enabled:
+        values = {
+            k: v
+            for k, v in (row.config or {}).items()
+            if k in spec.public_fields and v
+        }
+        values.update(_decrypt_secrets(row, spec))
+        if any(values.values()):
+            return ResolvedIntegration(provider=provider, values=values, source="user")
+
+    fallback = env_defaults(spec)
+    if fallback:
+        return ResolvedIntegration(provider=provider, values=fallback, source="env")
+
+    return None
+
+
+async def resolve_calendar_credentials(
+    user: User,
+    db: AsyncSession,
+) -> ResolvedIntegration | None:
+    """Google Calendar credentials, preferring the account's connected token.
+
+    The Connect Calendar OAuth flow stores a refresh token on ``users`` with
+    the legacy Fernet cipher (Decision D3 leaves that column alone). That token
+    wins over anything pasted into Settings, because it is the one the user
+    actually authorised.
+    """
+    resolved = await resolve_integration_config(user.id, "google_calendar", db)
+
+    if user.google_refresh_token:
+        try:
+            from core.security import decrypt_token
+
+            token = decrypt_token(user.google_refresh_token)
+        except Exception:
+            logger.warning("Could not decrypt stored calendar token for user %s", user.id)
+            token = ""
+        if token:
+            values = dict(resolved.values) if resolved else {}
+            values["refresh_token"] = token
+            return ResolvedIntegration(
+                provider="google_calendar",
+                values=values,
+                source=resolved.source if resolved else "user",
+            )
+
+    return resolved

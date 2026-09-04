@@ -4,6 +4,59 @@ from typing import Dict, Any, List, Optional
 from core.config import settings
 from pydantic import BaseModel
 
+
+# ── Per-user credentials ────────────────────────────────────────────────────
+# Every function takes an optional ``creds`` (core.user_config.ResolvedIntegration).
+# When omitted it falls back to the global env settings, so existing call sites
+# and the system-level fallback both keep working.
+
+
+def _erp_creds(creds: Any = None) -> tuple[str, str]:
+    """Return (base_url, api_token) from per-user creds or the env fallback."""
+    if creds is not None:
+        return creds.get("base_url"), creds.get("api_token")
+    return settings.ERPNEXT_BASE_URL, settings.ERPNEXT_API_TOKEN
+
+
+def _erp_headers(token: str, *, json_body: bool = False) -> Dict[str, str]:
+    headers = {"Authorization": f"token {token}"}
+    if json_body:
+        headers["Content-Type"] = "application/json"
+    return headers
+
+
+def _erp_unconfigured() -> Dict[str, Any]:
+    """ERPNext is optional — never raise, return a reason the caller can show."""
+    return {
+        "status": "error",
+        "reason": "not_configured",
+        "message": "ERPNext is not configured. Add it in Settings -> Integrations.",
+    }
+
+
+async def ping_erpnext(creds: Any = None) -> Dict[str, Any]:
+    """Verify credentials by requesting a single Lead. Used by the settings test."""
+    base_url, token = _erp_creds(creds)
+    if not base_url or not token:
+        return {"success": False, "message": "ERPNext is not configured."}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{base_url}/api/resource/Lead",
+                params={"limit_page_length": 1},
+                headers=_erp_headers(token),
+                timeout=10.0,
+            )
+        if response.status_code == 401 or response.status_code == 403:
+            return {"success": False, "message": "Authentication failed - check the API token."}
+        response.raise_for_status()
+        return {"success": True, "message": "Connected to ERPNext."}
+    except httpx.HTTPStatusError as exc:
+        return {"success": False, "message": f"ERPNext returned HTTP {exc.response.status_code}."}
+    except Exception as exc:
+        return {"success": False, "message": f"Connection failed: {type(exc).__name__}"}
+
+
 class LeadQuotationItem(BaseModel):
     item: str
     qty: int
@@ -18,21 +71,21 @@ class CreateLeadInput(BaseModel):
     docstatus: int = 1
     lead_quot_ct: List[LeadQuotationItem] = []
 
-async def create_erpnext_lead(input_data: CreateLeadInput) -> Dict[str, Any]:
-    """
-    Creates a lead in ERPNext.
-    """
+async def create_erpnext_lead(
+    input_data: CreateLeadInput, creds: Any = None
+) -> Dict[str, Any]:
+    """Creates a lead in ERPNext."""
+    base_url, token = _erp_creds(creds)
+    if not base_url or not token:
+        return _erp_unconfigured()
+
     payload = input_data.model_dump()
-        
-    headers = {
-        "Authorization": f"token {settings.ERPNEXT_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
+    headers = _erp_headers(token, json_body=True)
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                f"{settings.ERPNEXT_BASE_URL}/api/resource/Lead",
+                f"{base_url}/api/resource/Lead",
                 json=payload,
                 headers=headers,
                 timeout=10.0
@@ -66,16 +119,17 @@ class AnalyzeCrmInput(BaseModel):
     order_by: str = "creation desc"
 
 
-async def get_chatbot_link(lead_id: str) -> Dict[str, Any]:
+async def get_chatbot_link(lead_id: str, creds: Any = None) -> Dict[str, Any]:
     """Fetches the chatbot link/quotation link for a given Lead ID."""
-    headers = {
-        "Authorization": f"token {settings.ERPNEXT_API_TOKEN}",
-    }
+    base_url, token = _erp_creds(creds)
+    if not base_url or not token:
+        return _erp_unconfigured()
+    headers = _erp_headers(token)
 
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                f"{settings.ERPNEXT_BASE_URL}/api/method/education.education.chatbot_api.get_chatbot_link",
+                f"{base_url}/api/method/education.education.chatbot_api.get_chatbot_link",
                 params={"lead_id": lead_id},
                 headers=headers,
                 timeout=10.0,
@@ -88,13 +142,18 @@ async def get_chatbot_link(lead_id: str) -> Dict[str, Any]:
             return {"status": "error", "message": f"An error occurred: {str(e)}"}
 
 
-async def read_erpnext_lead(input_data: ReadLeadInput) -> Dict[str, Any]:
+async def read_erpnext_lead(
+    input_data: ReadLeadInput, creds: Any = None
+) -> Dict[str, Any]:
     """Reads a single lead from ERPNext by its Lead ID."""
-    headers = {"Authorization": f"token {settings.ERPNEXT_API_TOKEN}"}
+    base_url, token = _erp_creds(creds)
+    if not base_url or not token:
+        return _erp_unconfigured()
+    headers = _erp_headers(token)
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                f"{settings.ERPNEXT_BASE_URL}/api/resource/Lead/{input_data.lead_id}",
+                f"{base_url}/api/resource/Lead/{input_data.lead_id}",
                 headers=headers,
                 timeout=10.0,
             )
@@ -106,21 +165,23 @@ async def read_erpnext_lead(input_data: ReadLeadInput) -> Dict[str, Any]:
             return {"status": "error", "message": str(e)}
 
 
-async def update_erpnext_lead(input_data: UpdateLeadInput) -> Dict[str, Any]:
+async def update_erpnext_lead(
+    input_data: UpdateLeadInput, creds: Any = None
+) -> Dict[str, Any]:
     """Updates an existing lead in ERPNext."""
+    base_url, token = _erp_creds(creds)
+    if not base_url or not token:
+        return _erp_unconfigured()
+
     update_fields = input_data.model_dump(
         exclude={"lead_id"},
         exclude_none=True,
     )
-
-    headers = {
-        "Authorization": f"token {settings.ERPNEXT_API_TOKEN}",
-        "Content-Type": "application/json",
-    }
+    headers = _erp_headers(token, json_body=True)
     async with httpx.AsyncClient() as client:
         try:
             response = await client.put(
-                f"{settings.ERPNEXT_BASE_URL}/api/resource/Lead/{input_data.lead_id}",
+                f"{base_url}/api/resource/Lead/{input_data.lead_id}",
                 json=update_fields,
                 headers=headers,
                 timeout=10.0,
@@ -133,9 +194,14 @@ async def update_erpnext_lead(input_data: UpdateLeadInput) -> Dict[str, Any]:
             return {"status": "error", "message": str(e)}
 
 
-async def analyze_crm_data(input_data: AnalyzeCrmInput) -> Dict[str, Any]:
+async def analyze_crm_data(
+    input_data: AnalyzeCrmInput, creds: Any = None
+) -> Dict[str, Any]:
     """Fetches and summarises CRM records (Leads, Opportunities, etc.)."""
-    headers = {"Authorization": f"token {settings.ERPNEXT_API_TOKEN}"}
+    base_url, token = _erp_creds(creds)
+    if not base_url or not token:
+        return _erp_unconfigured()
+    headers = _erp_headers(token)
     params: Dict[str, Any] = {
         "fields": json.dumps(input_data.fields),
         "limit_page_length": input_data.limit,
@@ -148,7 +214,7 @@ async def analyze_crm_data(input_data: AnalyzeCrmInput) -> Dict[str, Any]:
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
-                f"{settings.ERPNEXT_BASE_URL}/api/resource/{input_data.doctype}",
+                f"{base_url}/api/resource/{input_data.doctype}",
                 params=params,
                 headers=headers,
                 timeout=15.0,

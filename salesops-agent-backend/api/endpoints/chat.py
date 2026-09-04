@@ -24,6 +24,10 @@ from agent_core.orchestrator import (
     SALES_AGENT_SYSTEM_PROMPT,
 )
 from core.security import get_current_user, decrypt_token
+from core.user_config import (
+    resolve_calendar_credentials,
+    resolve_integration_config,
+)
 from db.models import User, WorkflowRun, ChatMessageLog
 from db.session import get_db
 
@@ -31,6 +35,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SYSTEM_PROMPT = {"role": "system", "content": SALES_AGENT_SYSTEM_PROMPT}
+
+async def _resolve_integrations(user: User, db: AsyncSession) -> dict:
+    """Load this user's third-party credentials for the orchestrator's tools.
+
+    Every integration is optional: a provider the user has not configured
+    resolves to None and its tool reports "not configured" rather than failing
+    the run.
+    """
+    return {
+        "erpnext": await resolve_integration_config(user.id, "erpnext", db),
+        "google_places": await resolve_integration_config(user.id, "google_places", db),
+        "google_calendar": await resolve_calendar_credentials(user, db),
+    }
+
 
 # ── Pre-LLM trivial message guard ────────────────────────────────────────
 
@@ -200,7 +218,8 @@ async def chat_with_agent(
         reply = await run_orchestrator(
             messages,
             run_id=run_id,
-            google_refresh_token=decrypt_token(current_user.google_refresh_token)
+            google_refresh_token=decrypt_token(current_user.google_refresh_token),
+            integrations=await _resolve_integrations(current_user, db),
         )
 
         # Save the assistant response
@@ -269,6 +288,7 @@ async def chat_stream(
             google_refresh_token=decrypt_token(
                 current_user.google_refresh_token
             ),
+            integrations=await _resolve_integrations(current_user, db),
         )
 
         final_message = result["message"]

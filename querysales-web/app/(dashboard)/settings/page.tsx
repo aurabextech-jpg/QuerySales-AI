@@ -11,8 +11,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorBanner } from "@/components/ui/states";
 import { StatusPill } from "@/components/ui/status";
 import { apiGet } from "@/lib/api-client";
-import type { EmailConfig, EmbeddingConfig, LLMConfig } from "@/lib/types";
+import type {
+  EmailConfig,
+  EmbeddingConfig,
+  Integration,
+  LLMConfig,
+} from "@/lib/types";
 import { SettingsSectionForm } from "./settings-section-form";
+import { IntegrationCard } from "./integration-card";
 
 async function loadSection<T>(
   path: string,
@@ -28,10 +34,11 @@ async function loadSection<T>(
 }
 
 export default async function SettingsPage() {
-  const [llm, embedding, email] = await Promise.all([
+  const [llm, embedding, email, integrations] = await Promise.all([
     loadSection<LLMConfig>("/api/settings/llm"),
     loadSection<EmbeddingConfig>("/api/settings/embedding"),
     loadSection<EmailConfig>("/api/settings/email"),
+    loadSection<Integration[]>("/api/settings/integrations"),
   ]);
 
   return (
@@ -60,6 +67,23 @@ export default async function SettingsPage() {
         <ErrorBanner message={`Email — ${email.error}`} />
       ) : (
         <SettingsSectionForm section="email" config={email.data} />
+      )}
+
+      {/* Third-party integrations — credentials stored per user, encrypted. */}
+      <div className="pt-2">
+        <h3 className="text-sm font-semibold text-fg">Integrations</h3>
+        <p className="mt-0.5 text-sm text-fg-secondary">
+          Connect your own CRM and Google services. Credentials are encrypted at
+          rest and scoped to your account.
+        </p>
+      </div>
+
+      {integrations.error ? (
+        <ErrorBanner message={`Integrations — ${integrations.error}`} />
+      ) : (
+        (integrations.data ?? []).map((integration) => (
+          <IntegrationCard key={integration.provider} integration={integration} />
+        ))
       )}
 
       {/* Database — status only. Never the connection string. */}

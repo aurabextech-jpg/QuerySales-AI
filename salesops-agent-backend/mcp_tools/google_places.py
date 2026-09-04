@@ -44,12 +44,51 @@ class GetPlaceDetailsInput(BaseModel):
 # Tool implementations
 # ---------------------------------------------------------------------------
 
-async def search_businesses(input_data: SearchBusinessesInput) -> dict[str, Any]:
-    """Search for businesses using Google Places Text Search."""
-    # --- Real API call (Google Places API New — Text Search) ---
-    api_key = settings.GOOGLE_PLACES_API_KEY
+def _places_key(creds: Any = None) -> str:
+    """Per-user API key, falling back to the env setting."""
+    if creds is not None:
+        return creds.get("api_key")
+    return settings.GOOGLE_PLACES_API_KEY
+
+
+async def ping_places(creds: Any = None) -> dict[str, Any]:
+    """Verify the key with a single cheap search. Used by the settings test."""
+    api_key = _places_key(creds)
     if not api_key:
-        return {"status": "error", "message": "GOOGLE_PLACES_API_KEY is not configured"}
+        return {"success": False, "message": "Google Places is not configured."}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://places.googleapis.com/v1/places:searchText",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": api_key,
+                    "X-Goog-FieldMask": "places.id",
+                },
+                json={"textQuery": "coffee", "maxResultCount": 1},
+                timeout=10.0,
+            )
+        if response.status_code in (401, 403):
+            return {"success": False, "message": "Google rejected the API key."}
+        response.raise_for_status()
+        return {"success": True, "message": "Connected to Google Places."}
+    except httpx.HTTPStatusError as exc:
+        return {"success": False, "message": f"Google returned HTTP {exc.response.status_code}."}
+    except Exception as exc:
+        return {"success": False, "message": f"Connection failed: {type(exc).__name__}"}
+
+
+async def search_businesses(
+    input_data: SearchBusinessesInput, creds: Any = None
+) -> dict[str, Any]:
+    """Search for businesses using Google Places Text Search."""
+    api_key = _places_key(creds)
+    if not api_key:
+        return {
+            "status": "error",
+            "reason": "not_configured",
+            "message": "Google Places is not configured. Add it in Settings -> Integrations.",
+        }
 
     url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
@@ -98,11 +137,17 @@ async def search_businesses(input_data: SearchBusinessesInput) -> dict[str, Any]
             return {"status": "error", "message": str(exc)}
 
 
-async def get_place_details(input_data: GetPlaceDetailsInput) -> dict[str, Any]:
+async def get_place_details(
+    input_data: GetPlaceDetailsInput, creds: Any = None
+) -> dict[str, Any]:
     """Fetch detailed information about a single place by its place_id."""
-    api_key = settings.GOOGLE_PLACES_API_KEY
+    api_key = _places_key(creds)
     if not api_key:
-        return {"status": "error", "message": "GOOGLE_PLACES_API_KEY is not configured"}
+        return {
+            "status": "error",
+            "reason": "not_configured",
+            "message": "Google Places is not configured. Add it in Settings -> Integrations.",
+        }
 
     url = f"https://places.googleapis.com/v1/places/{input_data.place_id}"
     headers = {
@@ -166,7 +211,9 @@ class SearchLeadsMultiInput(BaseModel):
     )
 
 
-async def search_leads_multi(input_data: SearchLeadsMultiInput) -> dict[str, Any]:
+async def search_leads_multi(
+    input_data: SearchLeadsMultiInput, creds: Any = None
+) -> dict[str, Any]:
     """Run 3-4 search query variations in parallel and return deduplicated results.
 
     Strategy:
