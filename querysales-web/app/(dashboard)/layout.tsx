@@ -1,18 +1,27 @@
 /**
- * Dashboard layout — sidebar + content area.
- * All pages under (dashboard) get the sidebar automatically.
+ * Dashboard shell — fixed rail on desktop, sheet drawer on mobile, sticky
+ * topbar, and the ⌘K palette mounted once for every page underneath.
  */
 
+import { CommandPalette } from "@/components/command-palette";
 import { Sidebar } from "@/components/sidebar";
+import { Topbar } from "@/components/topbar";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen">
       <Sidebar />
-      {/* Content area — offset by sidebar width on desktop */}
-      <main className="flex-1 md:ml-[var(--sidebar-width)] min-h-screen">
-        <div className="p-6 md:p-8 max-w-7xl mx-auto">{children}</div>
-      </main>
+      <CommandPalette />
+      <div className="md:pl-(--sidebar-width)">
+        <Topbar />
+        <main className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

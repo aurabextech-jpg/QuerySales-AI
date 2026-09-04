@@ -1,51 +1,80 @@
-/** Empty state — shown when a list has no data. */
+/**
+ * Empty / error / loading states. Every list and panel in the app uses these
+ * so the four states (loading · success · error · empty) look identical
+ * everywhere.
+ */
 
-interface EmptyStateProps {
+import { AlertTriangleIcon, type LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  action,
+  className,
+}: {
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: React.ReactNode;
-  icon?: React.ReactNode;
-}
-
-export function EmptyState({ title, description, action, icon }: EmptyStateProps) {
+  className?: string;
+}) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      {icon && <div className="mb-4 text-text-muted text-4xl">{icon}</div>}
-      <h3 className="text-lg font-semibold text-text mb-1">{title}</h3>
-      {description && (
-        <p className="text-sm text-text-secondary max-w-sm mb-4">{description}</p>
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center px-6 py-16 text-center",
+        className,
       )}
-      {action}
+    >
+      {Icon && (
+        <div className="mb-4 flex size-11 items-center justify-center rounded-xl bg-muted text-fg-muted">
+          <Icon className="size-5" />
+        </div>
+      )}
+      <h3 className="text-sm font-semibold text-fg">{title}</h3>
+      {description && (
+        <p className="mt-1 max-w-sm text-sm text-fg-secondary">{description}</p>
+      )}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
-}
-
-/** Error state — shown when an operation fails. */
-
-interface ErrorStateProps {
-  title?: string;
-  message: string;
-  retry?: () => void;
 }
 
 export function ErrorState({
   title = "Something went wrong",
   message,
-  retry,
-}: ErrorStateProps) {
+  action,
+  className,
+}: {
+  title?: string;
+  message: string;
+  action?: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="mb-4 text-error text-4xl">!</div>
-      <h3 className="text-lg font-semibold text-text mb-1">{title}</h3>
-      <p className="text-sm text-text-secondary max-w-sm mb-4">{message}</p>
-      {retry && (
-        <button
-          onClick={retry}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-dark transition"
-        >
-          Try again
-        </button>
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center px-6 py-16 text-center",
+        className,
       )}
+    >
+      <div className="mb-4 flex size-11 items-center justify-center rounded-xl bg-danger-tint text-danger">
+        <AlertTriangleIcon className="size-5" />
+      </div>
+      <h3 className="text-sm font-semibold text-fg">{title}</h3>
+      <p className="mt-1 max-w-md text-sm text-fg-secondary">{message}</p>
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+/** Inline error banner — for page-level fetch failures above content. */
+export function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border-[0.5px] border-danger/30 bg-danger-tint px-4 py-3">
+      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-danger" />
+      <p className="text-sm text-danger">{message}</p>
     </div>
   );
 }

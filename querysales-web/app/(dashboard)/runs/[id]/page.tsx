@@ -1,29 +1,24 @@
 /**
- * Run detail page — shows the full event timeline for a completed run.
+ * Run detail — the full agent trace. Each phase is expandable so a reviewer
+ * can see the exact knowledge query, tool arguments, and outreach draft.
  */
 
 import Link from "next/link";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ArrowLeftIcon } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { ErrorState, EmptyState } from "@/components/ui/states";
+import { RunStatusPill, Score } from "@/components/ui/status";
+import { RunTimeline } from "@/components/agent/run-timeline";
 import { apiGet } from "@/lib/api-client";
-import type { RunSummary, AgentEvent, AgentPhase } from "@/lib/types";
+import { duration, timeAgo } from "@/lib/format";
+import type { AgentEvent, RunSummary } from "@/lib/types";
 
-interface RunDetailProps {
+export default async function RunDetailPage({
+  params,
+}: {
   params: Promise<{ id: string }>;
-}
-
-const phaseConfig: Record<AgentPhase, { icon: string; color: string; bgColor: string }> = {
-  OBSERVE: { icon: "👁", color: "text-info", bgColor: "bg-info-muted" },
-  RETRIEVE: { icon: "🔍", color: "text-accent", bgColor: "bg-accent-muted" },
-  REASON: { icon: "🧠", color: "text-primary", bgColor: "bg-primary-muted" },
-  PLAN: { icon: "📋", color: "text-primary-light", bgColor: "bg-primary-muted" },
-  TOOL_CALL: { icon: "🔧", color: "text-warning", bgColor: "bg-warning-muted" },
-  RESULT: { icon: "✨", color: "text-accent-green", bgColor: "bg-accent-green-muted" },
-  COMPLETE: { icon: "✅", color: "text-success", bgColor: "bg-success-muted" },
-  ERROR: { icon: "❌", color: "text-error", bgColor: "bg-error-muted" },
-};
-
-export default async function RunDetailPage({ params }: RunDetailProps) {
+}) {
   const { id } = await params;
 
   let run: RunSummary | null = null;
@@ -39,92 +34,104 @@ export default async function RunDetailPage({ params }: RunDetailProps) {
     error = err instanceof Error ? err.message : "Failed to load run.";
   }
 
-  if (error || !run) {
+  if (!run) {
     return (
-      <div className="space-y-6">
-        <Link href="/runs" className="text-sm text-primary hover:text-primary-light transition">
-          ← Back to runs
-        </Link>
-        <Card className="border-error/30 bg-error-muted">
-          <p className="text-sm text-error">{error ?? "Run not found."}</p>
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/runs">
+            <ArrowLeftIcon />
+            Back to runs
+          </Link>
+        </Button>
+        <Card className="p-0">
+          <ErrorState message={error ?? "Run not found."} />
         </Card>
       </div>
     );
   }
 
+  const meta = [
+    { label: "Started", value: timeAgo(run.created_at) },
+    { label: "Duration", value: duration(run.created_at, run.completed_at) },
+    { label: "Steps", value: String(events.length) },
+  ];
+
   return (
     <div className="space-y-6">
-      <Link href="/runs" className="text-sm text-primary hover:text-primary-light transition">
-        ← Back to runs
-      </Link>
+      <Button
+        variant="ghost"
+        size="sm"
+        asChild
+        className="-ml-2 text-fg-secondary hover:text-fg"
+      >
+        <Link href="/runs">
+          <ArrowLeftIcon />
+          Back to runs
+        </Link>
+      </Button>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <h1 className="text-2xl font-bold text-text">
-          Agent Run — {run.lead_company ?? "Unknown"}
-        </h1>
-        <Badge
-          variant={run.status === "completed" ? "success" : run.status === "failed" ? "error" : "primary"}
-        >
-          {run.status}
-        </Badge>
-        {run.score != null && (
-          <span className="text-sm text-text-secondary">
-            Score: <strong className="text-text">{run.score}/100</strong>
-          </span>
-        )}
-        {run.qualification && (
-          <span className="text-sm text-text-secondary">
-            {run.qualification}
-          </span>
-        )}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium tracking-wide text-fg-muted uppercase">
+            Agent run
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2.5">
+            <h2 className="text-xl font-semibold text-fg">
+              {run.lead_company ?? "Unknown lead"}
+            </h2>
+            <RunStatusPill status={run.status} />
+          </div>
+          {run.qualification && (
+            <p className="mt-1 text-sm text-fg-secondary">{run.qualification}</p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-4">
+          {run.lead_id && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/leads/${run.lead_id}`}>View lead</Link>
+            </Button>
+          )}
+          {run.score != null && (
+            <div className="rounded-xl border-[0.5px] border-line bg-muted px-4 py-2.5 text-center">
+              <p className="text-[11px] font-medium tracking-wide text-fg-muted uppercase">
+                Score
+              </p>
+              <p className="mt-0.5">
+                <Score value={run.score} className="text-xl" />
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Event timeline */}
-      <Card>
-        <h2 className="text-base font-semibold text-text mb-4">Event Timeline</h2>
+      {/* Run metadata */}
+      <div className="grid grid-cols-3 gap-3">
+        {meta.map((item) => (
+          <Card key={item.label} className="gap-0 p-3">
+            <p className="text-[11px] font-medium tracking-wide text-fg-muted uppercase">
+              {item.label}
+            </p>
+            <p className="tabular mt-1 text-sm font-medium text-fg">{item.value}</p>
+          </Card>
+        ))}
+      </div>
 
-        {events.length === 0 ? (
-          <p className="text-sm text-text-muted">No events recorded for this run.</p>
-        ) : (
-          <div className="space-y-0">
-            {events.map((event, index) => {
-              const config = phaseConfig[event.phase] ?? phaseConfig.OBSERVE;
-              const isLast = index === events.length - 1;
-
-              return (
-                <div key={event.id} className="flex gap-3">
-                  {/* Timeline connector */}
-                  <div className="flex flex-col items-center">
-                    <div
-                      className={`flex items-center justify-center w-8 h-8 rounded-full ${config.bgColor} ${config.color} text-sm shrink-0`}
-                    >
-                      {config.icon}
-                    </div>
-                    {!isLast && <div className="w-0.5 flex-1 min-h-4 bg-border my-1" />}
-                  </div>
-
-                  {/* Event content */}
-                  <div className={`pb-4 ${isLast ? "pb-0" : ""} flex-1 min-w-0`}>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-text">{event.label}</p>
-                      {event.tool_name && (
-                        <span className="text-xs font-mono text-text-muted bg-surface-highlight px-2 py-0.5 rounded">
-                          {event.tool_name}
-                        </span>
-                      )}
-                    </div>
-                    {event.detail && (
-                      <p className="text-xs text-text-secondary mt-0.5 whitespace-pre-wrap break-words max-w-2xl overflow-x-auto">
-                        {event.detail}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+      <Card className="gap-0 p-0">
+        <CardHeader className="py-4 hairline-b">
+          <CardTitle>Reasoning trace</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {events.length === 0 ? (
+            <EmptyState
+              title="No events recorded"
+              description="This run did not emit any phase events."
+            />
+          ) : (
+            <RunTimeline events={events} />
+          )}
+        </CardContent>
       </Card>
     </div>
   );

@@ -1,35 +1,33 @@
-/**
- * Branded 404 page — replaces the default Next.js "page could not be found".
- */
-
 import Image from "next/image";
 import Link from "next/link";
+import { ArrowLeftIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="text-center">
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="flex flex-col items-center text-center">
         <Image
           src="/logo.png"
-          alt="QuerySales AI"
-          width={64}
-          height={64}
+          alt=""
+          width={44}
+          height={44}
           priority
-          className="inline-block w-16 h-16 mb-6"
+          className="mb-6 size-11 rounded-xl"
         />
-        <p className="text-sm font-medium text-primary mb-2">404</p>
-        <h1 className="text-2xl font-bold text-text">
-          This page could not be found
-        </h1>
-        <p className="text-text-secondary mt-2 mb-8">
-          The page you are looking for doesn&apos;t exist or has been moved.
+        <p className="tabular text-xs font-medium tracking-widest text-fg-muted uppercase">
+          404
         </p>
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-dark transition"
-        >
-          Back to dashboard
-        </Link>
+        <h1 className="mt-2 text-xl font-semibold text-fg">Page not found</h1>
+        <p className="mt-1.5 max-w-sm text-sm text-fg-secondary">
+          This page doesn&apos;t exist or has moved.
+        </p>
+        <Button asChild className="mt-6">
+          <Link href="/dashboard">
+            <ArrowLeftIcon />
+            Back to dashboard
+          </Link>
+        </Button>
       </div>
     </div>
   );

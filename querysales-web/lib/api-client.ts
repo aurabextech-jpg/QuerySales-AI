@@ -46,16 +46,16 @@ export async function apiFetch<T>(
   path: string,
   init?: RequestInit & { params?: Record<string, string> },
 ): Promise<T> {
+  // `params` is ours, not fetch's — pull it out so it never reaches fetch().
+  const { params, ...fetchInit } = init ?? {};
+
   const url = new URL(path, API_URL);
-  if (init?.params) {
-    for (const [k, v] of Object.entries(init.params)) {
-      url.searchParams.set(k, v);
-    }
+  for (const [key, value] of Object.entries(params ?? {})) {
+    url.searchParams.set(key, value);
   }
 
-  const { params: _params, ...fetchInit } = init ?? {};
   const headers = await buildHeaders(
-    fetchInit?.headers as Record<string, string> | undefined,
+    fetchInit.headers as Record<string, string> | undefined,
   );
 
   const res = await fetch(url.toString(), {

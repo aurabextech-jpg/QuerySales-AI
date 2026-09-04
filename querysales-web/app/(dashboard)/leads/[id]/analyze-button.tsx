@@ -1,26 +1,23 @@
 /**
- * AnalyzeButton — client component that triggers analysis and shows the live timeline.
+ * AnalyzeButton — the primary CTA of the whole product. Starts an agent run
+ * and mounts the live timeline beneath it.
  */
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
+import { RotateCwIcon, SparklesIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AnalysisTimeline } from "@/components/agent/analysis-timeline-client";
 import type { RunSummary } from "@/lib/types";
 
-interface AnalyzeButtonProps {
-  leadId: string;
-}
-
-export function AnalyzeButton({ leadId }: AnalyzeButtonProps) {
-  const [loading, setLoading] = useState(false);
+export function AnalyzeButton({ leadId }: { leadId: string }) {
+  const [starting, setStarting] = useState(false);
   const [run, setRun] = useState<RunSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleAnalyze = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  async function analyze() {
+    setStarting(true);
     setRun(null);
 
     try {
@@ -30,42 +27,40 @@ export function AnalyzeButton({ leadId }: AnalyzeButtonProps) {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? "Analysis failed to start.");
-        setLoading(false);
+        toast.error("Could not start analysis", {
+          description: data.error ?? "The agent did not start.",
+          action: { label: "Retry", onClick: () => void analyze() },
+        });
         return;
       }
 
       setRun(data);
     } catch {
-      setError("Network error. Could not start analysis.");
+      toast.error("Network error", {
+        description: "Could not reach the server.",
+        action: { label: "Retry", onClick: () => void analyze() },
+      });
     } finally {
-      setLoading(false);
+      setStarting(false);
     }
-  }, [leadId]);
+  }
 
   return (
     <div className="space-y-4">
+      {/* Rule 2 — the single lime button on this screen. */}
       <Button
-        onClick={handleAnalyze}
-        loading={loading}
-        disabled={loading}
+        onClick={analyze}
+        disabled={starting}
         size="lg"
-        className="aurora-gradient text-white shadow-lg shadow-primary/20"
+        className="w-full glow-signal sm:w-auto"
       >
-        {loading ? "Starting…" : run ? "Re-analyze" : "Analyze with QuerySales AI"}
+        {run ? <RotateCwIcon /> : <SparklesIcon />}
+        {starting
+          ? "Starting…"
+          : run
+            ? "Re-analyze"
+            : "Analyze with QuerySales AI"}
       </Button>
-
-      {error && (
-        <div className="rounded-lg bg-error-muted border border-error/20 px-4 py-3 text-sm text-error">
-          {error}
-          <button
-            onClick={handleAnalyze}
-            className="ml-2 underline hover:no-underline"
-          >
-            Retry
-          </button>
-        </div>
-      )}
 
       {run && <AnalysisTimeline runId={run.id} />}
     </div>

@@ -1,12 +1,14 @@
-/**
- * Login form — client component for the auth form.
- */
-
 "use client";
 
 import Image from "next/image";
-import { useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useState, type FormEvent } from "react";
+import { ArrowRightIcon } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export function LoginForm() {
   const router = useRouter();
@@ -29,99 +31,107 @@ export function LoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? "Login failed.");
+        const message = data.error ?? "Login failed.";
+        setError(message);
+        toast.error("Sign-in failed", { description: message });
         return;
       }
 
       router.push(redirect);
     } catch {
-      setError("Network error. Please try again.");
+      const message = "Could not reach the server. Please try again.";
+      setError(message);
+      toast.error("Network error", { description: message });
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md">
-        {/* Logo / Brand */}
-        <div className="text-center mb-8">
+    <div className="signal-wash flex min-h-screen items-center justify-center px-4 py-12">
+      <div className="w-full max-w-sm">
+        {/* Brand */}
+        <div className="mb-8 flex flex-col items-center text-center">
           <Image
             src="/logo.png"
-            alt="QuerySales AI"
-            width={56}
-            height={56}
+            alt=""
+            width={44}
+            height={44}
             priority
-            className="inline-block w-14 h-14 mb-4"
+            className="mb-4 size-11 rounded-xl"
           />
-          <h1 className="text-2xl font-bold text-text">QuerySales AI</h1>
-          <p className="text-text-secondary mt-1">
-            Autonomous sales intelligence
+          <h1 className="text-xl font-semibold text-fg">QuerySales AI</h1>
+          <p className="mt-1 text-sm text-fg-secondary">
+            Your autonomous AI sales employee
           </p>
         </div>
 
-        {/* Login Card */}
-        <div className="glass-card p-8">
-          <h2 className="text-lg font-semibold text-text mb-6">Sign in</h2>
+        <Card>
+          <CardContent className="pt-1">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-lg border-[0.5px] border-danger/30 bg-danger-tint px-3 py-2.5 text-sm text-danger"
+                >
+                  {error}
+                </div>
+              )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-lg bg-error-muted border border-error/20 px-4 py-3 text-sm text-error">
-                {error}
+              <div>
+                <Label htmlFor="email" className="mb-1.5">
+                  Email
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  disabled={loading}
+                  className="h-9"
+                />
               </div>
-            )}
 
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-text-secondary mb-1.5"
-              >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
-                className="w-full rounded-lg border border-border bg-surface-highlight px-4 py-2.5 text-text placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary transition"
+              <div>
+                <Label htmlFor="password" className="mb-1.5">
+                  Password
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  disabled={loading}
+                  className="h-9"
+                />
+              </div>
+
+              {/* Rule 2 — the single lime action on this screen. */}
+              <Button
+                type="submit"
+                size="lg"
                 disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-text-secondary mb-1.5"
+                className="w-full glow-signal"
               >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full rounded-lg border border-border bg-surface-highlight px-4 py-2.5 text-text placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary transition"
-                disabled={loading}
-              />
-            </div>
+                {loading ? "Signing in…" : "Sign in"}
+                {!loading && <ArrowRightIcon />}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
-        </div>
+        <p className="mt-6 text-center text-xs text-fg-muted">
+          Knowledge → RAG → Reasoning → Tool calling → Sales action
+        </p>
       </div>
     </div>
   );

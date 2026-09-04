@@ -120,6 +120,44 @@ export interface OutreachDraft {
   created_at: string;
 }
 
+/* ── Agent chat ────────────────────────────────────────────────────── */
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * One step of the orchestrator's run. `agent` marks a hand-off to a
+ * sub-agent; `tool_start` / `tool_result` bracket a single tool call.
+ */
+export interface ChatStep {
+  type: "agent" | "tool_start" | "tool_result";
+  agent?: string;
+  tool?: string;
+  content?: string;
+}
+
+/** Response body of POST /api/chat (backend /api/chat/stream). */
+export interface ChatResponse {
+  run_id: string;
+  status: string;
+  steps: ChatStep[];
+  message: string;
+}
+
+export interface ChatHistoryMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export interface ChatHistory {
+  run_id: string;
+  messages: ChatHistoryMessage[];
+}
+
 /* ── Settings ──────────────────────────────────────────────────────── */
 
 /** Mirrors backend LLMConfigResponse (GET /api/settings/llm). */

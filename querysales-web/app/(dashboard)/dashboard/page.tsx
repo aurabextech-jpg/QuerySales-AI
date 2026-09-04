@@ -1,148 +1,174 @@
 /**
- * Dashboard page — server component fetching stats + recent leads.
+ * Dashboard — server component. Fetches stats + leads + recent runs in
+ * parallel; each panel degrades on its own so one failing call never blanks
+ * the page.
  */
 
-import { Card } from "@/components/ui/card";
-import { Badge, leadStatusVariant } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/states";
-import { apiGet } from "@/lib/api-client";
-import type { DashboardStats, Lead } from "@/lib/types";
 import Link from "next/link";
+import {
+  ArrowRightIcon,
+  BookOpenIcon,
+  BotIcon,
+  CircleCheckIcon,
+  MailIcon,
+  SparklesIcon,
+  TargetIcon,
+} from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { EmptyState, ErrorBanner } from "@/components/ui/states";
+import { RunStatusPill, Score } from "@/components/ui/status";
+import { StatCard, StatCardSkeleton } from "@/components/dashboard/stat-card";
+import { LeadsTable } from "@/components/leads/leads-table";
+import { apiGet } from "@/lib/api-client";
+import { timeAgo } from "@/lib/format";
+import type { DashboardStats, Lead, RunSummary } from "@/lib/types";
+
+async function safe<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch {
+    return null;
+  }
+}
 
 export default async function DashboardPage() {
-  let stats: DashboardStats | null = null;
-  let recentLeads: Lead[] = [];
-  let error: string | null = null;
+  const [stats, leads, runs] = await Promise.all([
+    safe(apiGet<DashboardStats>("/api/dashboard/stats")),
+    safe(apiGet<Lead[]>("/api/leads")),
+    safe(apiGet<RunSummary[]>("/api/runs")),
+  ]);
 
-  try {
-    [stats, recentLeads] = await Promise.all([
-      apiGet<DashboardStats>("/api/dashboard/stats"),
-      apiGet<Lead[]>("/api/leads"),
-    ]);
-  } catch (err) {
-    error =
-      err instanceof Error ? err.message : "Failed to load dashboard data.";
-  }
-
-  const kpis = stats
-    ? [
-        { label: "Total Leads", value: stats.total_leads },
-        { label: "Qualified", value: stats.qualified_leads },
-        { label: "Outreach Sent", value: stats.outreach_sent },
-        { label: "Active Runs", value: stats.active_runs },
-        { label: "Knowledge Docs", value: stats.knowledge_documents },
-      ]
-    : [];
-
-  const leads = recentLeads.slice(0, 5);
+  const recentRuns = (runs ?? []).slice(0, 5);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-text">Dashboard</h1>
-        <p className="text-text-secondary mt-1">
-          Overview of your sales intelligence pipeline
-        </p>
+      {/* Page intro */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-fg">Pipeline overview</h2>
+          <p className="mt-0.5 text-sm text-fg-secondary">
+            What your AI sales employee has been working on.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/agent">
+              <SparklesIcon />
+              Ask the agent
+            </Link>
+          </Button>
+          {/* Rule 2 — the single lime action on this screen */}
+          <Button asChild>
+            <Link href="/leads">
+              Analyze a lead
+              <ArrowRightIcon />
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      {error && (
-        <Card className="border-error/30 bg-error-muted">
-          <p className="text-sm text-error">{error}</p>
-        </Card>
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {stats ? (
+          <>
+            <StatCard label="Total leads" value={stats.total_leads} icon={TargetIcon} />
+            <StatCard
+              label="Qualified"
+              value={stats.qualified_leads}
+              icon={CircleCheckIcon}
+              accent
+              hint={
+                stats.total_leads > 0
+                  ? `${Math.round((stats.qualified_leads / stats.total_leads) * 100)}% of pipeline`
+                  : undefined
+              }
+            />
+            <StatCard label="Outreach sent" value={stats.outreach_sent} icon={MailIcon} />
+            <StatCard label="Active runs" value={stats.active_runs} icon={BotIcon} />
+            <StatCard
+              label="Knowledge docs"
+              value={stats.knowledge_documents}
+              icon={BookOpenIcon}
+            />
+          </>
+        ) : (
+          Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)
+        )}
+      </div>
+
+      {!stats && (
+        <ErrorBanner message="Dashboard statistics are unavailable. The backend may be unreachable." />
       )}
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {kpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <p className="text-xs font-medium text-text-muted uppercase tracking-wide">
-              {kpi.label}
-            </p>
-            <p className="text-3xl font-bold text-text mt-1">{kpi.value}</p>
-          </Card>
-        ))}
-        {!stats &&
-          !error &&
-          Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i}>
-              <div className="h-3 w-20 rounded bg-surface-highlight animate-pulse" />
-              <div className="h-8 w-12 rounded bg-surface-highlight animate-pulse mt-2" />
-            </Card>
-          ))}
-      </div>
-
-      {/* Recent leads table */}
-      <Card padding="sm">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-base font-semibold text-text">Recent Leads</h2>
-          <Link
-            href="/leads"
-            className="text-xs font-medium text-primary hover:text-primary-light transition"
-          >
-            View all →
-          </Link>
-        </div>
-
-        {leads.length === 0 && !error ? (
-          <EmptyState
-            title="No leads yet"
-            description="Run the seed script to populate demo data, or add leads manually."
-            icon="🎯"
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left">
-                  <th className="px-4 py-2.5 font-medium text-text-muted">
-                    Company
-                  </th>
-                  <th className="px-4 py-2.5 font-medium text-text-muted">
-                    Industry
-                  </th>
-                  <th className="px-4 py-2.5 font-medium text-text-muted">
-                    Score
-                  </th>
-                  <th className="px-4 py-2.5 font-medium text-text-muted">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((lead) => (
-                  <tr
-                    key={lead.id}
-                    className="border-b border-border-light hover:bg-surface-highlight transition"
-                  >
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/leads/${lead.id}`}
-                        className="font-medium text-text hover:text-primary transition"
-                      >
-                        {lead.company}
-                      </Link>
-                      {lead.name && (
-                        <p className="text-xs text-text-muted">{lead.name}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary">
-                      {lead.industry ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary">
-                      {lead.score ?? "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={leadStatusVariant(lead.status)}>
-                        {lead.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Recent leads */}
+        <section className="space-y-3 lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-fg">Recent leads</h3>
+            <Link
+              href="/leads"
+              className="inline-flex items-center gap-1 text-xs font-medium text-fg-secondary transition-colors hover:text-fg"
+            >
+              View all
+              <ArrowRightIcon className="size-3" />
+            </Link>
           </div>
-        )}
-      </Card>
+          <LeadsTable
+            leads={leads ?? []}
+            error={leads ? null : "Could not load leads."}
+            compact
+          />
+        </section>
+
+        {/* Agent activity */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-fg">Agent activity</h3>
+            <Link
+              href="/runs"
+              className="inline-flex items-center gap-1 text-xs font-medium text-fg-secondary transition-colors hover:text-fg"
+            >
+              View all
+              <ArrowRightIcon className="size-3" />
+            </Link>
+          </div>
+
+          <Card className="p-0">
+            {recentRuns.length === 0 ? (
+              <EmptyState
+                icon={BotIcon}
+                title="No runs yet"
+                description="Analyze a lead to see the agent work."
+              />
+            ) : (
+              <ul className="divide-y-[0.5px] divide-line">
+                {recentRuns.map((run) => (
+                  <li key={run.id}>
+                    <Link
+                      href={`/runs/${run.id}`}
+                      className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-fg">
+                          {run.lead_company ?? "Unknown lead"}
+                        </p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <RunStatusPill status={run.status} />
+                          {run.score != null && <Score value={run.score} />}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs text-fg-muted">
+                        {timeAgo(run.created_at)}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </section>
+      </div>
     </div>
   );
 }

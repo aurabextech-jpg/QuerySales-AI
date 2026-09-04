@@ -1,140 +1,164 @@
-/**
- * Sidebar navigation component.
- */
-
 "use client";
 
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import {
+  BookOpenIcon,
+  BotIcon,
+  LayoutDashboardIcon,
+  LogOutIcon,
+  MenuIcon,
+  SettingsIcon,
+  SparklesIcon,
+  TargetIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: "📊" },
-  { href: "/leads", label: "Leads", icon: "🎯" },
-  { href: "/knowledge", label: "Knowledge", icon: "📚" },
-  { href: "/runs", label: "Agent Runs", icon: "🤖" },
-  { href: "/settings", label: "Settings", icon: "⚙️" },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboardIcon },
+  { href: "/agent", label: "Agent", icon: SparklesIcon },
+  { href: "/leads", label: "Leads", icon: TargetIcon },
+  { href: "/knowledge", label: "Knowledge", icon: BookOpenIcon },
+  { href: "/runs", label: "Agent Runs", icon: BotIcon },
+  { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
-export function Sidebar() {
+function Brand() {
+  return (
+    <div className="flex items-center gap-2.5 px-4 py-4">
+      <Image
+        src="/logo.png"
+        alt=""
+        width={30}
+        height={30}
+        priority
+        className="size-[30px] rounded-lg"
+      />
+      <div className="min-w-0">
+        <p className="truncate text-[13px] leading-tight font-semibold text-fg">
+          QuerySales AI
+        </p>
+        <p className="truncate text-[11px] leading-tight text-fg-muted">
+          Sales Intelligence
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+
+  return (
+    <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
+      {NAV_ITEMS.map((item) => {
+        const active =
+          pathname === item.href || pathname.startsWith(`${item.href}/`);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onNavigate}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors",
+              // Rule 1: lime marks the active nav item — the one "action" state
+              // in the rail. Everything else stays neutral.
+              active
+                ? "bg-signal text-on-signal"
+                : "text-fg-secondary hover:bg-muted hover:text-fg",
+            )}
+          >
+            <item.icon className="size-4 shrink-0" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SignOutButton() {
   const router = useRouter();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
+    setBusy(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+    } catch {
+      toast.error("Could not sign out. Please try again.");
+      setBusy(false);
+    }
   }
 
   return (
-    <>
-      {/* Mobile hamburger */}
-      <button
-        onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-4 left-4 z-50 md:hidden rounded-lg bg-surface border border-border p-2 text-text"
-        aria-label="Toggle navigation"
-      >
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          {mobileOpen ? (
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          ) : (
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          )}
-        </svg>
-      </button>
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={handleLogout}
+      disabled={busy}
+      className="w-full justify-start text-fg-secondary hover:text-fg"
+    >
+      <LogOutIcon />
+      {busy ? "Signing out…" : "Sign out"}
+    </Button>
+  );
+}
 
-      {/* Backdrop on mobile */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <div className="flex h-full flex-col">
+      <Brand />
+      <div className="mx-2 hairline-b" />
+      <NavLinks onNavigate={onNavigate} />
+      <div className="mx-2 hairline-t" />
+      <div className="p-2">
+        <SignOutButton />
+      </div>
+    </div>
+  );
+}
 
-      {/* Sidebar */}
-      <aside
-        className={`fixed top-0 left-0 z-40 h-full w-[var(--sidebar-width)] bg-surface border-r border-border flex flex-col transition-transform md:translate-x-0 ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        {/* Brand */}
-        <div className="flex items-center gap-3 px-6 py-5 border-b border-border">
-          <Image
-            src="/logo.png"
-            alt="QuerySales AI"
-            width={36}
-            height={36}
-            priority
-            className="w-9 h-9"
-          />
-          <div>
-            <h1 className="text-sm font-bold text-text">QuerySales AI</h1>
-            <p className="text-xs text-text-muted">Sales Intelligence</p>
-          </div>
-        </div>
+/** Desktop rail — fixed, hairline right edge. */
+export function Sidebar() {
+  return (
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-width) bg-sidebar hairline-r md:block">
+      <SidebarBody />
+    </aside>
+  );
+}
 
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.map((item) => {
-            const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                  active
-                    ? "bg-primary-muted text-primary"
-                    : "text-text-secondary hover:bg-surface-highlight hover:text-text"
-                }`}
-              >
-                <span className="text-base">{item.icon}</span>
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+/** Mobile trigger — lives in the topbar, opens a sheet. */
+export function SidebarMobileTrigger() {
+  // The drawer closes from the nav links' onNavigate callback, so no effect
+  // has to watch the pathname.
+  const [open, setOpen] = useState(false);
 
-        {/* Footer */}
-        <div className="px-3 py-4 border-t border-border">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-text-secondary hover:bg-error-muted hover:text-error transition w-full"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
-            Logout
-          </button>
-        </div>
-      </aside>
-    </>
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon-sm" className="md:hidden" aria-label="Open navigation">
+          <MenuIcon />
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-(--sidebar-width) p-0">
+        <SheetTitle className="sr-only">Navigation</SheetTitle>
+        <SidebarBody onNavigate={() => setOpen(false)} />
+      </SheetContent>
+    </Sheet>
   );
 }

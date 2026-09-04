@@ -1,132 +1,414 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-/* ── Design tokens (ported from salesopsapp/src/theme.ts) ────────────── */
+@custom-variant dark (&:is(.dark *));
 
+/* ═══════════════════════════════════════════════════════════════════════
+   QuerySales AI — "Graphite & Signal Lime"
+
+   Rules this file enforces:
+     1. Lime is for ACTIONS only — primary button, active nav, focus ring.
+        Never headings, never scores, never links.
+     2. One lime button per screen. Everything else is outline or ghost.
+     3. Status badges are neutral outline pills + a 6px colour dot.
+     4. Text on lime is always near-black (--on-signal). Never white.
+     5. Borders 0.5px · card radius 12px · button radius 8px.
+     6. Themes switch through these variables — never a hardcoded hex.
+
+   shadcn/ui reads --primary, --background, --border, --ring … so the brand
+   palette is defined once here and mapped onto that contract below. Every
+   shadcn component then inherits the theme with no per-component overrides.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── LIGHT (default) ─────────────────────────────────────────────────── */
 :root {
-  /* Light palette */
-  --background: #F8F9FC;
-  --surface: #FFFFFF;
-  --surface-highlight: #EEF4FA;
-  --surface-elevated: #FFFFFF;
+  color-scheme: light;
 
-  --primary: #5B57FF;
-  --primary-light: #885CF6;
-  --primary-dark: #4A46D4;
-  --primary-muted: rgba(91, 87, 255, 0.08);
+  /* Brand palette */
+  --canvas: #f7f7f4;
+  --surface: #ffffff;
+  --raised: #f0f1ec;
 
-  --accent: #28B7FF;
-  --accent-muted: rgba(40, 183, 255, 0.08);
-  --accent-green: #14D7B0;
-  --accent-green-muted: rgba(20, 215, 176, 0.08);
+  --line: #e2e4dc;
+  --line-strong: #d3d6cb;
 
-  --text: #0F172A;
-  --text-secondary: #64748B;
-  --text-muted: #94A3B8;
+  --fg: #14150f;
+  --fg-secondary: #5f6357;
+  --fg-muted: #8b9082;
 
-  --border: #E2E8F0;
-  --border-light: #F1F5F9;
+  /* Data / score text — deliberately NOT lime (rule 1) */
+  --data: #4d7c0f;
 
-  --error: #EF4444;
-  --error-muted: rgba(239, 68, 68, 0.06);
-  --success: #16A34A;
-  --success-muted: rgba(22, 163, 74, 0.08);
-  --warning: #D97706;
-  --warning-muted: rgba(217, 119, 6, 0.08);
-  --info: #28B7FF;
-  --info-muted: rgba(40, 183, 255, 0.08);
+  /* Signal Lime — actions only */
+  --signal: #c3f53c;
+  --signal-hover: #d3ff5c;
+  --signal-pressed: #b2e42b;
+  --on-signal: #0b0c0a;
+  /* Lime darkened for use as a hairline ring on white — same family,
+     readable contrast. The palette supplies it as the light Qualified dot. */
+  --signal-ink: #7ca61a;
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --warning: #b47714;
+  --danger: #d6452f;
 
-  --sidebar-width: 260px;
+  --dot-qualified: #7ca61a;
+  --dot-nurture: #b47714;
+  --dot-neutral: #a8ac9e;
+
+  /* Tints — subtle backgrounds only, never text */
+  --signal-tint: rgba(124, 166, 26, 0.1);
+  --warning-tint: rgba(180, 119, 20, 0.1);
+  --danger-tint: rgba(214, 69, 47, 0.09);
+
+  --shadow-card: 0 1px 2px rgba(20, 21, 15, 0.04);
+  --shadow-pop: 0 8px 28px rgba(20, 21, 15, 0.1);
+  --shadow-signal: 0 2px 12px rgba(124, 166, 26, 0.3);
+
+  --hairline: 0.5px;
+  --sidebar-width: 248px;
+
+  /* ── shadcn contract ───────────────────────────────────────────────── */
+  --radius: 8px; /* button radius (rule 5) */
+
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+
+  --primary: var(--signal);
+  --primary-foreground: var(--on-signal);
+
+  --secondary: var(--raised);
+  --secondary-foreground: var(--fg);
+  --muted: var(--raised);
+  --muted-foreground: var(--fg-secondary);
+  --accent: var(--raised);
+  --accent-foreground: var(--fg);
+
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--signal-ink);
+
+  --chart-1: #7ca61a;
+  --chart-2: #4d7c0f;
+  --chart-3: #b47714;
+  --chart-4: #8b9082;
+  --chart-5: #d6452f;
+
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--signal);
+  --sidebar-primary-foreground: var(--on-signal);
+  --sidebar-accent: var(--raised);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--signal-ink);
 }
 
-/* Dark mode — the primary demo theme */
-.dark,
-[data-theme="dark"] {
-  --background: #07111F;
-  --surface: #0D1728;
-  --surface-highlight: #121F35;
-  --surface-elevated: #162032;
+/* ── DARK ────────────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
 
-  --primary: #6D5CFF;
-  --primary-light: #885CF6;
-  --primary-dark: #5A4AD4;
-  --primary-muted: rgba(109, 92, 255, 0.15);
+  --canvas: #0b0c0a;
+  --surface: #141613;
+  --raised: #1d201c;
 
-  --accent: #36CFFF;
-  --accent-muted: rgba(54, 207, 255, 0.12);
-  --accent-green: #2BE4B8;
-  --accent-green-muted: rgba(43, 228, 184, 0.12);
+  --line: #2a2e27;
+  --line-strong: #3a3f35;
 
-  --text: #F8FAFC;
-  --text-secondary: #8FA3BF;
-  --text-muted: #5A7190;
+  --fg: #f0f2ec;
+  --fg-secondary: #9ca396;
+  --fg-muted: #6e7567;
 
-  --border: rgba(143, 163, 191, 0.15);
-  --border-light: rgba(143, 163, 191, 0.08);
+  --data: #b8e986;
 
-  --error: #EF4444;
-  --error-muted: rgba(239, 68, 68, 0.12);
-  --success: #22C55E;
-  --success-muted: rgba(34, 197, 94, 0.12);
-  --warning: #F59E0B;
-  --warning-muted: rgba(245, 158, 11, 0.12);
-  --info: #36CFFF;
-  --info-muted: rgba(54, 207, 255, 0.12);
+  --signal: #c3f53c;
+  --signal-hover: #d3ff5c;
+  --signal-pressed: #b2e42b;
+  --on-signal: #0b0c0a;
+  --signal-ink: #c3f53c;
+
+  --warning: #f2b84b;
+  --danger: #ff6b5a;
+
+  --dot-qualified: #c3f53c;
+  --dot-nurture: #f2b84b;
+  --dot-neutral: #5a6053;
+
+  --signal-tint: rgba(195, 245, 60, 0.1);
+  --warning-tint: rgba(242, 184, 75, 0.12);
+  --danger-tint: rgba(255, 107, 90, 0.12);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --shadow-signal: 0 2px 16px rgba(195, 245, 60, 0.2);
+
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--raised);
+  --popover-foreground: var(--fg);
+
+  --primary: var(--signal);
+  --primary-foreground: var(--on-signal);
+
+  --secondary: var(--raised);
+  --secondary-foreground: var(--fg);
+  --muted: var(--raised);
+  --muted-foreground: var(--fg-secondary);
+  --accent: var(--raised);
+  --accent-foreground: var(--fg);
+
+  --destructive: var(--danger);
+  --destructive-foreground: #0b0c0a;
+
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--signal);
+
+  --chart-1: #c3f53c;
+  --chart-2: #b8e986;
+  --chart-3: #f2b84b;
+  --chart-4: #9ca396;
+  --chart-5: #ff6b5a;
+
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--signal);
+  --sidebar-primary-foreground: var(--on-signal);
+  --sidebar-accent: var(--raised);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--signal);
 }
 
+/* ── Tailwind token bridge ───────────────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
+  /* Brand semantics — use these in app code */
+  --color-canvas: var(--canvas);
   --color-surface: var(--surface);
-  --color-surface-highlight: var(--surface-highlight);
-  --color-surface-elevated: var(--surface-elevated);
+  --color-raised: var(--raised);
 
-  --color-primary: var(--primary);
-  --color-primary-light: var(--primary-light);
-  --color-primary-dark: var(--primary-dark);
-  --color-primary-muted: var(--primary-muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
 
-  --color-accent: var(--accent);
-  --color-accent-muted: var(--accent-muted);
-  --color-accent-green: var(--accent-green);
-  --color-accent-green-muted: var(--accent-green-muted);
+  --color-fg: var(--fg);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-muted: var(--fg-muted);
 
-  --color-text: var(--text);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted: var(--text-muted);
+  --color-data: var(--data);
 
-  --color-border: var(--border);
-  --color-border-light: var(--border-light);
+  --color-signal: var(--signal);
+  --color-signal-hover: var(--signal-hover);
+  --color-signal-pressed: var(--signal-pressed);
+  --color-signal-ink: var(--signal-ink);
+  --color-on-signal: var(--on-signal);
 
-  --color-error: var(--error);
-  --color-error-muted: var(--error-muted);
-  --color-success: var(--success);
-  --color-success-muted: var(--success-muted);
   --color-warning: var(--warning);
-  --color-warning-muted: var(--warning-muted);
-  --color-info: var(--info);
-  --color-info-muted: var(--info-muted);
+  --color-danger: var(--danger);
+
+  --color-signal-tint: var(--signal-tint);
+  --color-warning-tint: var(--warning-tint);
+  --color-danger-tint: var(--danger-tint);
+
+  --color-dot-qualified: var(--dot-qualified);
+  --color-dot-nurture: var(--dot-nurture);
+  --color-dot-neutral: var(--dot-neutral);
+
+  /* shadcn semantics */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Radii — button 8px, card 12px (rule 5) */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 999px;
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
 }
 
-body {
-  background: var(--background);
-  color: var(--text);
-  font-family: var(--font-sans, system-ui, sans-serif);
+/* ── Base ────────────────────────────────────────────────────────────── */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Tight, editorial heading tracking — the SaaS "expensive" cue */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.018em;
+  }
+
+  /* Rule 5: hairline borders. shadcn cards ship with ring-1; swap it for
+     a 0.5px border so every edge in the app is the same weight. */
+  [data-slot="card"] {
+    box-shadow: var(--shadow-card);
+    border: var(--hairline) solid var(--line);
+    --tw-ring-shadow: 0 0 transparent;
+  }
+
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="select-content"],
+  [data-slot="dialog-content"],
+  [data-slot="command-dialog-content"] {
+    box-shadow: var(--shadow-pop);
+  }
 }
 
-/* Aurora gradient utility */
-.aurora-gradient {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 50%, var(--accent) 100%);
+/* ── Utilities ───────────────────────────────────────────────────────── */
+
+/* Numbers align in tables and score displays */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
-/* Glass card effect */
-.glass-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+.hairline-b {
+  border-bottom: var(--hairline) solid var(--line);
+}
+.hairline-t {
+  border-top: var(--hairline) solid var(--line);
+}
+.hairline-r {
+  border-right: var(--hairline) solid var(--line);
+}
+.hairline {
+  border: var(--hairline) solid var(--line);
+}
+
+/* The single lime CTA on a screen (rule 2) gets a soft signal glow */
+.glow-signal {
+  box-shadow: var(--shadow-signal);
+}
+
+/* Ambient lime wash behind hero surfaces — very low opacity, decorative */
+.signal-wash {
+  background-image: radial-gradient(
+    120% 100% at 50% 0%,
+    var(--signal-tint) 0%,
+    transparent 60%
+  );
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────── */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* "Agent is working" indicator */
+@keyframes signal-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 var(--signal-tint);
+  }
+  50% {
+    opacity: 0.65;
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+.animate-signal-pulse {
+  animation: signal-pulse 1.6s ease-in-out infinite;
+}
+
+/* Indeterminate progress sweep for in-flight agent runs */
+@keyframes track-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.animate-sweep {
+  animation: track-sweep 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .animate-signal-pulse,
+  .animate-sweep {
+    animation: none;
+  }
 }

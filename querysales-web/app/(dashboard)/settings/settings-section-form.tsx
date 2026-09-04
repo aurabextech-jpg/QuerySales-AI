@@ -1,20 +1,22 @@
 /**
- * Settings section form — client component for editing one config section.
+ * Settings section form — one config section (LLM · embeddings · email).
  *
- * Each user manages their own providers (plan §52): the form PUTs to
- * /api/settings/{section}, tests via POST /api/settings/{section}/test,
- * and can remove the config with DELETE. Secrets are only ever *sent* —
- * the key input starts empty ("leave blank to keep the current key") and
- * the stored key is displayed masked, never fetched into the browser.
+ * Secrets are only ever *sent*: the key input starts empty ("leave blank to
+ * keep the current key") and the stored value is shown masked. The browser
+ * never receives the plaintext (plan §47).
  */
 
 "use client";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
+import { CheckCircle2Icon, PlugZapIcon, SaveIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { StatusPill } from "@/components/ui/status";
 import type {
   EmbeddingConfig,
   EmailConfig,
@@ -31,10 +33,8 @@ interface Field {
   placeholder?: string;
   hint?: string;
   step?: string;
+  wide?: boolean;
 }
-
-const INPUT_CLASS =
-  "w-full rounded-lg border border-border bg-surface-highlight px-4 py-2.5 text-text placeholder:text-text-muted outline-none focus:border-primary focus:ring-1 focus:ring-primary transition";
 
 const SECTIONS: Record<
   SettingsSection,
@@ -45,7 +45,13 @@ const SECTIONS: Record<
     description:
       "Any OpenAI-compatible endpoint powers agent reasoning and outreach generation.",
     fields: [
-      { name: "base_url", label: "Base URL", type: "text", placeholder: "https://api.openai.com/v1" },
+      {
+        name: "base_url",
+        label: "Base URL",
+        type: "text",
+        placeholder: "https://api.openai.com/v1",
+        wide: true,
+      },
       { name: "model", label: "Model", type: "text", placeholder: "gpt-4o-mini" },
       {
         name: "api_key",
@@ -61,10 +67,21 @@ const SECTIONS: Record<
   embedding: {
     title: "Embeddings",
     description:
-      "Embedding model for knowledge vectorization. Dimension is fixed at 1536.",
+      "Vectorizes your knowledge base. Dimension is fixed at 1536 to match the pgvector column.",
     fields: [
-      { name: "base_url", label: "Base URL", type: "text", placeholder: "https://api.openai.com/v1" },
-      { name: "model", label: "Model", type: "text", placeholder: "text-embedding-3-small" },
+      {
+        name: "base_url",
+        label: "Base URL",
+        type: "text",
+        placeholder: "https://api.openai.com/v1",
+        wide: true,
+      },
+      {
+        name: "model",
+        label: "Model",
+        type: "text",
+        placeholder: "text-embedding-3-small",
+      },
       {
         name: "api_key",
         label: "API key",
@@ -77,9 +94,15 @@ const SECTIONS: Record<
   email: {
     title: "Email / Outreach",
     description:
-      "SMTP credentials for sending outreach emails. Gmail: use an App Password.",
+      "SMTP credentials for sending approved outreach. For Gmail, use an App Password.",
     fields: [
-      { name: "email_address", label: "Email address", type: "text", placeholder: "you@gmail.com" },
+      {
+        name: "email_address",
+        label: "Email address",
+        type: "text",
+        placeholder: "you@gmail.com",
+        wide: true,
+      },
       { name: "smtp_host", label: "SMTP host", type: "text", placeholder: "smtp.gmail.com" },
       { name: "smtp_port", label: "SMTP port", type: "number", placeholder: "587" },
       {
@@ -99,11 +122,11 @@ function initialValues(
   config: SectionConfig | null,
 ): Record<string, string> {
   if (!config?.configured) {
-    return section === "email"
-      ? { email_address: "", smtp_host: "smtp.gmail.com", smtp_port: "587" }
-      : section === "llm"
-        ? { base_url: "", model: "", temperature: "0.7", max_tokens: "4096" }
-        : { base_url: "", model: "" };
+    if (section === "email")
+      return { email_address: "", smtp_host: "smtp.gmail.com", smtp_port: "587" };
+    if (section === "llm")
+      return { base_url: "", model: "", temperature: "0.7", max_tokens: "4096" };
+    return { base_url: "", model: "" };
   }
   if (section === "llm") {
     const c = config as LLMConfig;
@@ -156,21 +179,22 @@ function buildBody(section: SettingsSection, values: Record<string, string>) {
   };
 }
 
-interface SettingsSectionFormProps {
+export function SettingsSectionForm({
+  section,
+  config,
+}: {
   section: SettingsSection;
   config: SectionConfig | null;
-}
-
-export function SettingsSectionForm({ section, config }: SettingsSectionFormProps) {
+}) {
   const meta = SECTIONS[section];
   const router = useRouter();
 
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const base = initialValues(section, config);
-    return { ...base, api_key: "", smtp_password: "" };
-  });
+  const [values, setValues] = useState<Record<string, string>>(() => ({
+    ...initialValues(section, config),
+    api_key: "",
+    smtp_password: "",
+  }));
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const maskedKey =
     config && "api_key_masked" in config ? config.api_key_masked : null;
@@ -185,7 +209,6 @@ export function SettingsSectionForm({ section, config }: SettingsSectionFormProp
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setBusy("save");
-    setMessage(null);
     try {
       const res = await fetch(`/api/settings/${section}`, {
         method: "PUT",
@@ -194,14 +217,14 @@ export function SettingsSectionForm({ section, config }: SettingsSectionFormProp
       });
       const data = await res.json();
       if (!res.ok) {
-        setMessage({ ok: false, text: data.error ?? "Save failed." });
+        toast.error(`${meta.title} not saved`, { description: data.error });
         return;
       }
-      setMessage({ ok: true, text: "Configuration saved." });
+      toast.success(`${meta.title} saved`);
       setValues((v) => ({ ...v, api_key: "", smtp_password: "" }));
       router.refresh();
     } catch {
-      setMessage({ ok: false, text: "Network error. Please try again." });
+      toast.error("Network error", { description: "Please try again." });
     } finally {
       setBusy(null);
     }
@@ -209,17 +232,23 @@ export function SettingsSectionForm({ section, config }: SettingsSectionFormProp
 
   async function handleTest() {
     setBusy("test");
-    setMessage(null);
+    const pending = toast.loading(`Testing ${meta.title.toLowerCase()}…`);
     try {
       const res = await fetch(`/api/settings/${section}/test`, { method: "POST" });
       const data = await res.json();
-      if (!res.ok) {
-        setMessage({ ok: false, text: data.error ?? "Test failed." });
+      if (!res.ok || !data.success) {
+        toast.error("Connection failed", {
+          id: pending,
+          description: data.message ?? data.error,
+        });
         return;
       }
-      setMessage({ ok: data.success, text: data.message });
+      toast.success("Connection successful", {
+        id: pending,
+        description: data.message,
+      });
     } catch {
-      setMessage({ ok: false, text: "Network error. Please try again." });
+      toast.error("Network error", { id: pending, description: "Please try again." });
     } finally {
       setBusy(null);
     }
@@ -228,24 +257,23 @@ export function SettingsSectionForm({ section, config }: SettingsSectionFormProp
   async function handleRemove() {
     if (
       !window.confirm(
-        "Remove this configuration? The agent will lose access to this provider.",
+        `Remove the ${meta.title} configuration? The agent will lose access to this provider.`,
       )
     ) {
       return;
     }
     setBusy("remove");
-    setMessage(null);
     try {
       const res = await fetch(`/api/settings/${section}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setMessage({ ok: false, text: data.error ?? "Remove failed." });
+        toast.error("Could not remove", { description: data.error });
         return;
       }
-      setMessage({ ok: true, text: "Configuration removed." });
+      toast.success(`${meta.title} configuration removed`);
       router.refresh();
     } catch {
-      setMessage({ ok: false, text: "Network error. Please try again." });
+      toast.error("Network error", { description: "Please try again." });
     } finally {
       setBusy(null);
     }
@@ -255,94 +283,96 @@ export function SettingsSectionForm({ section, config }: SettingsSectionFormProp
 
   return (
     <Card>
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <h2 className="text-base font-semibold text-text">{meta.title}</h2>
-          <p className="text-sm text-text-secondary mt-0.5">{meta.description}</p>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <CardTitle>{meta.title}</CardTitle>
+            <p className="mt-1 text-sm text-fg-secondary">{meta.description}</p>
+          </div>
+          <StatusPill tone={configured ? "qualified" : "neutral"}>
+            {configured ? "Configured" : "Not configured"}
+          </StatusPill>
         </div>
-        <Badge variant={configured ? "success" : "warning"}>
-          {configured ? "Configured" : "Not configured"}
-        </Badge>
-      </div>
+      </CardHeader>
 
-      {maskedKey && (
-        <p className="text-xs text-text-muted mb-3">
-          Current key:{" "}
-          <code className="font-mono text-text-secondary bg-surface-highlight px-2 py-0.5 rounded">
-            {maskedKey}
-          </code>
-        </p>
-      )}
-      {section === "email" && hasPassword && (
-        <p className="text-xs text-text-muted mb-3">Password saved (hidden).</p>
-      )}
+      <CardContent>
+        {(maskedKey || (section === "email" && hasPassword)) && (
+          <p className="mb-4 flex items-center gap-1.5 text-xs text-fg-muted">
+            <CheckCircle2Icon className="size-3.5 text-dot-qualified" />
+            {maskedKey ? (
+              <>
+                Stored key{" "}
+                <code className="rounded border-[0.5px] border-line bg-muted px-1.5 py-0.5 font-mono text-fg-secondary">
+                  {maskedKey}
+                </code>
+              </>
+            ) : (
+              "Password saved — never sent back to the browser."
+            )}
+          </p>
+        )}
 
-      <form onSubmit={handleSave} className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          {meta.fields.map((field) => (
-            <div key={field.name}>
-              <label
-                htmlFor={`${section}-${field.name}`}
-                className="block text-sm font-medium text-text-secondary mb-1.5"
-              >
-                {field.label}
-              </label>
-              <input
-                id={`${section}-${field.name}`}
-                name={field.name}
-                type={field.type}
-                step={field.step}
-                autoComplete="off"
-                value={values[field.name] ?? ""}
-                onChange={(e) => set(field.name, e.target.value)}
-                placeholder={field.placeholder}
-                className={INPUT_CLASS}
-                disabled={disabled}
-              />
-              {field.hint && (
-                <p className="text-xs text-text-muted mt-1">{field.hint}</p>
-              )}
-            </div>
-          ))}
-        </div>
+        <form onSubmit={handleSave} className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {meta.fields.map((field) => (
+              <div key={field.name} className={field.wide ? "sm:col-span-2" : undefined}>
+                <Label htmlFor={`${section}-${field.name}`} className="mb-1.5">
+                  {field.label}
+                </Label>
+                <Input
+                  id={`${section}-${field.name}`}
+                  name={field.name}
+                  type={field.type}
+                  step={field.step}
+                  autoComplete="off"
+                  value={values[field.name] ?? ""}
+                  onChange={(e) => set(field.name, e.target.value)}
+                  placeholder={field.placeholder}
+                  disabled={disabled}
+                />
+                {field.hint && (
+                  <p className="mt-1 text-xs text-fg-muted">{field.hint}</p>
+                )}
+              </div>
+            ))}
+          </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="sm" loading={busy === "save"} disabled={disabled}>
-            {configured ? "Save changes" : "Save configuration"}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleTest}
-            loading={busy === "test"}
-            disabled={disabled || !configured}
-          >
-            Test connection
-          </Button>
-          {configured && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Rule 2 — save is the lime action; test and remove stay quiet. */}
+            <Button type="submit" size="sm" disabled={disabled}>
+              <SaveIcon />
+              {busy === "save"
+                ? "Saving…"
+                : configured
+                  ? "Save changes"
+                  : "Save configuration"}
+            </Button>
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               size="sm"
-              onClick={handleRemove}
-              loading={busy === "remove"}
-              disabled={disabled}
-              className="text-error hover:text-error"
+              onClick={handleTest}
+              disabled={disabled || !configured}
             >
-              Remove
+              <PlugZapIcon />
+              {busy === "test" ? "Testing…" : "Test connection"}
             </Button>
-          )}
-          {message && (
-            <span
-              className={`text-sm ${message.ok ? "text-success" : "text-error"}`}
-              role="status"
-            >
-              {message.ok ? "✓" : "✗"} {message.text}
-            </span>
-          )}
-        </div>
-      </form>
+            {configured && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleRemove}
+                disabled={disabled}
+                className="ml-auto text-fg-muted hover:text-danger"
+              >
+                <Trash2Icon />
+                Remove
+              </Button>
+            )}
+          </div>
+        </form>
+      </CardContent>
     </Card>
   );
 }

@@ -179,10 +179,15 @@ async def get_lead(
         for d in drafts_result.scalars().all()
     ]
 
-    resp = LeadDetailResponse.model_validate(lead)
-    resp.runs = runs
-    resp.outreach_drafts = drafts
-    return resp
+    # Validate against the *base* model, not LeadDetailResponse: `runs` and
+    # `outreach_drafts` are also lazy relationships on the Lead ORM object, so
+    # letting Pydantic read them off `lead` triggers lazy IO on the async
+    # session and raises MissingGreenlet. Both lists are already loaded above.
+    return LeadDetailResponse(
+        **LeadResponse.model_validate(lead).model_dump(),
+        runs=runs,
+        outreach_drafts=drafts,
+    )
 
 
 @router.patch("/{lead_id}", response_model=LeadResponse)
