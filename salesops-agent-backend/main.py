@@ -7,6 +7,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from core.user_config import ConfigurationMissing
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +33,13 @@ app.add_middleware(
 )
 
 # ── Global Exception Handlers ────────────────────────────────────────────
+
+
+@app.exception_handler(ConfigurationMissing)
+async def configuration_missing_handler(request: Request, exc: ConfigurationMissing):
+    """Return 400 with an actionable message when per-user config is absent."""
+    return JSONResponse(status_code=400, content={"detail": exc.message})
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
@@ -86,7 +95,7 @@ async def validation_exception_handler(
 async def health_check():
     return {"status": "healthy"}
 
-from api.endpoints import chat, runs, logs, dashboard, calendar, pages
+from api.endpoints import chat, runs, logs, dashboard, calendar, pages, settings as settings_ep
 
 app.include_router(pages.router, tags=["legal"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
@@ -94,6 +103,7 @@ app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(logs.router, prefix="/api/workflows", tags=["trace-logs"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["calendar"])
+app.include_router(settings_ep.router, prefix="/api/settings", tags=["settings"])
 
 
 if __name__ == "__main__":

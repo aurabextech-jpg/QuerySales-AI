@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_MODEL: str = "z-ai/glm-4.5-air:free"
 
+    # ── System-fallback LLM / Embedding (Phase 2) ───────────────────────
+    # Used when a user has NOT configured their own per-user row.
+    # The resolution service (core/user_config.py) falls back to these.
+    LLM_BASE_URL: str = ""
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gemini-2.5-flash"
+    EMBEDDING_BASE_URL: str = ""
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
+    EMBEDDING_DIMENSION: int = 1536
+
     # ── Security ─────────────────────────────────────────────────────────
     ENCRYPTION_KEY: str = ""
 

@@ -323,7 +323,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 |-------|------|--------|---------|
 | 0 | Audit, foundation & environment | ✅ Complete | [phase-0-foundation.md](summery/phase-0-foundation.md) |
 | 1 | Data model & migrations | ✅ Complete | [phase-1-data-model.md](summery/phase-1-data-model.md) |
-| 2 | Per-user config, crypto & settings API | ⬜ Not started | — |
+| 2 | Per-user config, crypto & settings API | ✅ Complete | [phase-2-user-config.md](summery/phase-2-user-config.md) |
 | 3 | RAG pipeline & knowledge API | ⬜ Not started | — |
 | 4 | Autonomous sales agent & tools | ⬜ Not started | — |
 | 5 | Leads, analyze & run/trace APIs | ⬜ Not started | — |
