@@ -373,6 +373,50 @@ class OutreachDraft(Base):
     run = relationship("WorkflowRun", back_populates="outreach_drafts")
 
 
+class MailMessage(Base):
+    """One email in the user's Mail workspace — inbound (IMAP sync) or
+    outbound (approved reply sent via SMTP).  Trash = trashed_at set."""
+
+    __tablename__ = "mail_messages"
+    __table_args__ = (
+        Index("ix_mail_messages_user_dir_trashed", "user_id", "direction", "trashed_at"),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    direction = Column(String, nullable=False)  # inbound | outbound
+    imap_uid = Column(Integer, nullable=True)  # IMAP UID — inbound dedup key
+    message_id = Column(String, nullable=True)  # RFC-822 Message-ID (threading)
+    from_addr = Column(String, nullable=False, default="")
+    to_addrs = Column(String, nullable=False, default="")
+    subject = Column(String, nullable=False, default="")
+    body_text = Column(Text, nullable=False, default="")
+    received_at = Column(DateTime, default=_utcnow, nullable=False)
+    read_at = Column(DateTime, nullable=True)
+    trashed_at = Column(DateTime, nullable=True)
+    in_reply_to_id = Column(String, ForeignKey("mail_messages.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class MailDraft(Base):
+    """An editable reply draft.  Statuses: draft → sent | discarded.
+    Never sent automatically — approval is a separate endpoint."""
+
+    __tablename__ = "mail_drafts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    inbound_message_id = Column(String, ForeignKey("mail_messages.id"), nullable=True)
+    run_id = Column(String, ForeignKey("workflow_runs.id"), nullable=True)
+    to_addr = Column(String, nullable=False, default="")
+    subject = Column(String, nullable=False, default="")
+    body = Column(Text, nullable=False, default="")
+    status = Column(String, default="draft", nullable=False)
+    sent_message_id = Column(String, ForeignKey("mail_messages.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class UserIntegrationConfig(Base):
     """Per-user third-party integration credentials (plan §41).
 
