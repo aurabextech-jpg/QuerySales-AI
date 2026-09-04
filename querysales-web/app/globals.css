@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+/* ── Design tokens (ported from salesopsapp/src/theme.ts) ────────────── */
+
+:root {
+  /* Light palette */
+  --background: #F8F9FC;
+  --surface: #FFFFFF;
+  --surface-highlight: #EEF4FA;
+  --surface-elevated: #FFFFFF;
+
+  --primary: #5B57FF;
+  --primary-light: #885CF6;
+  --primary-dark: #4A46D4;
+  --primary-muted: rgba(91, 87, 255, 0.08);
+
+  --accent: #28B7FF;
+  --accent-muted: rgba(40, 183, 255, 0.08);
+  --accent-green: #14D7B0;
+  --accent-green-muted: rgba(20, 215, 176, 0.08);
+
+  --text: #0F172A;
+  --text-secondary: #64748B;
+  --text-muted: #94A3B8;
+
+  --border: #E2E8F0;
+  --border-light: #F1F5F9;
+
+  --error: #EF4444;
+  --error-muted: rgba(239, 68, 68, 0.06);
+  --success: #16A34A;
+  --success-muted: rgba(22, 163, 74, 0.08);
+  --warning: #D97706;
+  --warning-muted: rgba(217, 119, 6, 0.08);
+  --info: #28B7FF;
+  --info-muted: rgba(40, 183, 255, 0.08);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --sidebar-width: 260px;
+}
+
+/* Dark mode — the primary demo theme */
+.dark,
+[data-theme="dark"] {
+  --background: #07111F;
+  --surface: #0D1728;
+  --surface-highlight: #121F35;
+  --surface-elevated: #162032;
+
+  --primary: #6D5CFF;
+  --primary-light: #885CF6;
+  --primary-dark: #5A4AD4;
+  --primary-muted: rgba(109, 92, 255, 0.15);
+
+  --accent: #36CFFF;
+  --accent-muted: rgba(54, 207, 255, 0.12);
+  --accent-green: #2BE4B8;
+  --accent-green-muted: rgba(43, 228, 184, 0.12);
+
+  --text: #F8FAFC;
+  --text-secondary: #8FA3BF;
+  --text-muted: #5A7190;
+
+  --border: rgba(143, 163, 191, 0.15);
+  --border-light: rgba(143, 163, 191, 0.08);
+
+  --error: #EF4444;
+  --error-muted: rgba(239, 68, 68, 0.12);
+  --success: #22C55E;
+  --success-muted: rgba(34, 197, 94, 0.12);
+  --warning: #F59E0B;
+  --warning-muted: rgba(245, 158, 11, 0.12);
+  --info: #36CFFF;
+  --info-muted: rgba(54, 207, 255, 0.12);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-highlight: var(--surface-highlight);
+  --color-surface-elevated: var(--surface-elevated);
+
+  --color-primary: var(--primary);
+  --color-primary-light: var(--primary-light);
+  --color-primary-dark: var(--primary-dark);
+  --color-primary-muted: var(--primary-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-muted: var(--accent-muted);
+  --color-accent-green: var(--accent-green);
+  --color-accent-green-muted: var(--accent-green-muted);
+
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+
+  --color-error: var(--error);
+  --color-error-muted: var(--error-muted);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+/* Aurora gradient utility */
+.aurora-gradient {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 50%, var(--accent) 100%);
+}
+
+/* Glass card effect */
+.glass-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
