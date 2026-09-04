@@ -45,8 +45,7 @@ AISeekho-challenge/
 │   ├── mcp_tools/               ←   erpnext.py, gmail.py, google_places.py, google_calendar.py
 │   ├── alembic/                 ←   migrations
 │   └── main.py                  ←   FastAPI entrypoint
-├── salesopsapp/                 ← React Native app. REFERENCE ONLY. Do not build on it.
-└── querysales-web/              ← Next.js dashboard. DOES NOT EXIST YET — Phase 7 creates it.
+└── querysales-web/              ← Next.js 16 dashboard (App Router, proxy.ts auth gate)
 ```
 
 ### Architecture
@@ -114,10 +113,10 @@ Do not build: multi-agent swarms, WhatsApp, voice/calling, LinkedIn, Google Plac
 enterprise RBAC, billing, teams, Kubernetes, event-driven infrastructure, or the mobile app.
 If a feature threatens the core demo, simplify it, push it to P1/P2, and keep moving.
 
-### 3.7 The React Native app is read-only
-`salesopsapp/` is a design and API-usage reference. Extract concepts (`theme.ts` palette,
-`WorkflowTimeline.tsx`, `GlassCard.tsx`, `RunLogCard.tsx`, `MetricCard.tsx`). **Never** edit it,
-and never copy React Native code verbatim into the web app.
+### 3.7 The React Native app was removed
+`salesopsapp/` (design/API reference for the RN-era system) was deleted from the working
+tree on 2026-09-04 after all needed concepts had been ported to the web app. It remains
+recoverable from git history at commit `34f2f12` (`git checkout 34f2f12 -- salesopsapp/`).
 
 ---
 
@@ -340,6 +339,14 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   called it and 404'd. The Database card was removed from the UI by request;
   the backend `GET /api/settings/database` (postgres + pgvector status) was kept
   for debugging via curl.
+
+- **2026-09-04 — App branding.** The lime-green Q logo (source `public/logo.png`,
+  RGBA with transparent 22.8% rounded corners) is now the favicon
+  (`app/icon.png` 512), Apple touch icon (`app/apple-icon.png` 180, square — iOS
+  masks it itself), sidebar brand, login logo, and the branded 404
+  (`app/not-found.tsx`). All create-next-app template assets were deleted. The
+  source image ships opaque gray corners — regenerate variants with a
+  rounded-rect alpha mask, not a plain resize.
 
 ---
 
