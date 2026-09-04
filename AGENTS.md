@@ -374,6 +374,21 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   secret. The web dashboard never reads it. The calendar OAuth *exchange* uses the user's own
   client id/secret from their integration config.
 
+- **2026-09-04 — Inbound email + Mail workspace (feature, on `main`).** Two user-scoped tables
+  `mail_messages` + `mail_drafts` (migration `9a4f092a31fb`). The IMAP host is **derived from the
+  user's SMTP host** (`services/mail_service.py:derive_imap_host`; `KNOWN_IMAP_HOSTS` covers
+  Gmail/Yahoo, else `smtp.`→`imap.`) — there is deliberately **no separate IMAP field**; Settings →
+  Email still configures only SMTP. `sync_inbox` is **read-only against the provider**
+  (`IMAP4_SSL` + `SELECT INBOX readonly=True`, dedup by `imap_uid`): it only INSERTs local copies and
+  never mutates or deletes remote mail. Approving a draft sends via SMTP **and** writes a local
+  `outbound` copy, so the Sent folder is ours, not the provider's. Drafts **never auto-send** —
+  `run_inbound_reply_agent` (one run per "Generate drafts" batch, `workflow_type="inbound_reply"`)
+  creates `mail_drafts` rows in status `draft`; sending is the separate approval endpoint. Backend
+  router `/api/mail` (14 endpoints) is proxied by the catch-all `app/api/mail/[...segments]/route.ts`
+  and rendered by `/mail` (`app/(dashboard)/mail/`), which reuses `AnalysisTimeline` (polling) for
+  generation progress. The client `mailFetch` 401 handler does a hard `window.location.href="/login"`
+  (intentional full state reset; benign Next lint warning — it is module-level, so no router hook).
+
 ---
 
 ## 8. Decision Log
@@ -393,6 +408,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | D9 | **No system-wide credential fallback at all** (plan §54 Option A). Every user configures their own LLM, embedding, email, ERPNext, Google Places and Google Calendar credentials in Settings. | A shared key means one tenant's quota, rate limits and billing are spent by everyone, and a leak exposes all users at once. Removing the fallback also makes the isolation guarantee checkable: `core/config.py` holds no provider credential, so there is nothing to leak across users. |
 | D10 | Third-party integrations use **one generic `user_integration_config` table** driven by a provider registry (`core/integrations.py`), not one table per provider. | plan §41 names this table. Secrets for a provider live in a single AES-256-GCM JSON blob, non-secret fields in plain JSON so Settings can display them. Adding a provider is a change to the registry alone — no migration, no new endpoints, no frontend change. |
 | D11 | The chat orchestrator's four agents are built **per run from the caller's single model**; the old heavy/medium/light Gemini tiering is gone. | The tiering existed only because three global keys were available. A user configures one provider, so there is one model to route to. This closed the last rule §3.4 violation. |
+| D12 | **Mail reads via IMAP and sends via SMTP, but the workspace lives in our Postgres** (`mail_messages` / `mail_drafts`), user-scoped. The IMAP host is **derived from the SMTP host** (no separate IMAP credential); inbox sync is **read-only** against the provider; agent replies become editable **drafts** that never send without an explicit approval endpoint. | One email config in Settings (the user already enters SMTP) instead of two, matching every major provider's `smtp.`→`imap.` convention. Local storage gives per-user isolation (rule §3.2) and Gmail-style folders without depending on the provider's folder semantics. Read-only sync + draft-then-approve keeps a human in the loop — the agent can never silently send or alter mail. |
 
 ---
 
