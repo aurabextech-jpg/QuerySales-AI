@@ -94,6 +94,7 @@ class WorkflowRun(Base):
     completed_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
+    lead = relationship("Lead", back_populates="runs")
     steps = relationship("WorkflowStep", back_populates="run")
     messages = relationship("ChatMessageLog", back_populates="run")
     events = relationship("AgentEvent", back_populates="run", order_by="AgentEvent.sequence")
@@ -187,7 +188,6 @@ class Lead(Base):
     user = relationship("User", back_populates="leads")
     runs = relationship("WorkflowRun", back_populates="lead")
     outreach_drafts = relationship("OutreachDraft", back_populates="lead")
-    documents = relationship("KnowledgeDocument", back_populates="user", foreign_keys="KnowledgeDocument.user_id")
 
 
 class KnowledgeDocument(Base):
