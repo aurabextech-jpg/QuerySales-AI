@@ -202,7 +202,8 @@ uvicorn main:app --reload --port 8000     # run API      → http://localhost:80
 alembic revision --autogenerate -m "msg"  # generate migration (READ IT before applying)
 alembic upgrade head                      # apply migrations
 alembic downgrade -1                      # roll back one
-python -m scripts.seed_demo               # seed demo users/leads/knowledge  (Phase 6)
+python -m scripts.seed_demo               # seed local-only users/leads/knowledge  (Phase 6)
+python -m scripts.create_demo_user        # create loginable demo user (Neon Auth) + seed  (README demo)
 
 # ── Frontend (from querysales-web/) ───────────────────────────────────────
 npm run dev            # dev server → http://localhost:3000
@@ -299,6 +300,36 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 - **Next.js 16 `proxy.ts` replaces `middleware.ts`.** The function export is `proxy`,
   runtime is `nodejs` (not edge). `config.matcher` is unchanged.
   `useSearchParams()` requires `<Suspense>` wrapper. `cookies()` is async-only.
+
+- **2026-09-04 — Demo user exists in Neon Auth.** `demo@querysales.demo` / `Demo1234!`
+  (Neon Auth id `5a7fbeaf-ac0a-4917-b432-5d83e7742ea1`), created by
+  `scripts/create_demo_user.py`, seeded with the User-A dataset (5 leads, 4 chunked
+  docs). Credentials are documented in `querysales-web/README.md`. The Phase 6
+  alice/bob rows are **local-only phantoms** — they have data but cannot log in.
+
+- **`get_current_user` upserts local users by `id` (JWT `sub`), NOT by email.** Seeding
+  with a locally generated id (as `seed_demo.py` does) leaves that data invisible after
+  a real login. `scripts/create_demo_user.py` exists precisely to sign the user up in
+  Neon Auth first and seed against the real id.
+
+- **Better Auth sign-up requires an `Origin` header** (else `400 MISSING_ORIGIN`);
+  `http://localhost:3000` is trusted on this Neon Auth instance. Sign-in works
+  without it. Server-side fetches must add the header manually.
+
+- **Neon Auth `GET /token` authenticates via the session cookie, NOT the Bearer
+  token** (verified 2026-09-04 with a 4-way test: Bearer body-token → 401, Bearer
+  full-cookie-value → 401, `Cookie: __Secure-*.session_token=…` → 200). The RN
+  reference flow (Bearer body token) no longer works against this instance.
+  `app/api/auth/login/route.ts` therefore forwards the sign-in response's
+  `set-cookie` to the `/token` exchange. Watch out when testing with Python:
+  `httpx.Client` silently carries a cookie jar, which masks this behaviour —
+  use a fresh client per request to reproduce faithfully.
+
+- **Neon Auth rejects any request whose `sec-fetch-mode` is `cors` but has no
+  `Origin` header** (`403 MISSING_OR_NULL_ORIGIN`). Node's `fetch` (undici) sends
+  `sec-fetch-mode: cors` on every server-side call, so Next.js route handlers
+  hitting Neon Auth must always set an explicit `Origin` (any localhost port is
+  trusted; deployed domains must be registered in the Neon Auth console).
 
 ---
 

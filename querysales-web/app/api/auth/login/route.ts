@@ -1,10 +1,18 @@
 /**
  * POST /api/auth/login — Sign in via Neon Auth and store JWT as httpOnly cookie.
  *
- * Mirrors salesopsapp/src/services/authService.ts flow:
- * 1. POST {NEON_AUTH_URL}/sign-in/email → extract session token
- * 2. GET  {NEON_AUTH_URL}/token         → exchange for JWT
+ * Flow:
+ * 1. POST {NEON_AUTH_URL}/sign-in/email → session cookie in the response
+ * 2. GET  {NEON_AUTH_URL}/token         → exchange the session cookie for a JWT
  * 3. Set JWT as httpOnly cookie
+ *
+ * Two Neon Auth (Better Auth) quirks, both verified against the live instance
+ * (2026-09-04), shape this code:
+ * - The CSRF check requires an Origin header when the request carries
+ *   `sec-fetch-mode: cors` — which Node's fetch (undici) always sends.
+ * - GET /token authenticates via the `__Secure-*.session_token` cookie from
+ *   the sign-in response; the body token as a Bearer is rejected with 401.
+ *   Node's fetch has no cookie jar, so the cookie must be forwarded manually.
  */
 
 import { NextResponse } from "next/server";
@@ -12,24 +20,24 @@ import { AUTH_COOKIE } from "@/lib/auth";
 
 const NEON_AUTH_URL = process.env.NEON_AUTH_URL!;
 
+/** Request headers that satisfy Better Auth's Origin/CSRF check. */
+const authHeaders = (origin: string) => ({ Origin: origin });
+
 /**
- * Extract session token from Neon Auth response.
- * Better Auth may return it in the body or as a set-cookie header.
- * Preserves base64 padding by rejoining with '='.
+ * Extract the session cookie pair (`name=value`) from the sign-in response.
+ * Returns the first cookie whose name contains `session_token`.
  */
-function extractToken(data: unknown, headers: Headers): string | null {
-  const body = data as Record<string, unknown>;
-  if (body?.token && typeof body.token === "string") return body.token;
-
-  const cookie = headers.get("set-cookie");
-  if (cookie) {
-    const firstPart = cookie.split(";")[0];
-    const parts = firstPart.split("=");
-    if (parts.length > 1) {
-      return parts.slice(1).join("=");
-    }
+function extractSessionCookie(res: Response): string | null {
+  const cookies = res.headers.getSetCookie?.() ?? [];
+  for (const cookie of cookies) {
+    const pair = cookie.split(";")[0];
+    if (pair.includes("session_token")) return pair;
   }
-
+  // Fallback for runtimes without getSetCookie()
+  const raw = res.headers.get("set-cookie");
+  if (raw?.includes("session_token")) {
+    return raw.split(";")[0];
+  }
   return null;
 }
 
@@ -44,10 +52,12 @@ export async function POST(request: Request) {
       );
     }
 
+    const origin = new URL(request.url).origin;
+
     // Step 1: Sign in
     const signInRes = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders(origin) },
       body: JSON.stringify({ email, password }),
       // Don't follow redirects — we need the set-cookie
       redirect: "manual",
@@ -62,17 +72,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: message }, { status: 401 });
     }
 
-    const sessionToken = extractToken(signInData, signInRes.headers);
-    if (!sessionToken) {
+    const sessionCookie = extractSessionCookie(signInRes);
+    if (!sessionCookie) {
       return NextResponse.json(
-        { error: "No session token received from auth provider." },
+        { error: "No session cookie received from auth provider." },
         { status: 502 },
       );
     }
 
-    // Step 2: Exchange for JWT
+    // Step 2: Exchange for JWT — authenticated by the forwarded session cookie
     const tokenRes = await fetch(`${NEON_AUTH_URL}/token`, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
+      headers: { Cookie: sessionCookie, ...authHeaders(origin) },
     });
 
     const tokenData = await tokenRes.json().catch(() => ({}));
