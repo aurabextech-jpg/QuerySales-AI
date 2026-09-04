@@ -9,6 +9,7 @@ import {
   BotIcon,
   LayoutDashboardIcon,
   LogOutIcon,
+  MailIcon,
   MenuIcon,
   SettingsIcon,
   SparklesIcon,
@@ -28,6 +29,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboardIcon },
+  { href: "/mail", label: "Mail", icon: MailIcon },
   { href: "/agent", label: "Agent", icon: SparklesIcon },
   { href: "/leads", label: "Leads", icon: TargetIcon },
   { href: "/knowledge", label: "Knowledge", icon: BookOpenIcon },

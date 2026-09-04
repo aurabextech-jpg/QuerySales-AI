@@ -226,3 +226,64 @@ export interface TestResult {
   success: boolean;
   message: string;
 }
+
+/* ── Mail workspace ────────────────────────────────────────────────── */
+
+export type MailFolder = "inbox" | "sent" | "trash";
+
+export interface MailMessageListItem {
+  id: string;
+  direction: "inbound" | "outbound";
+  from_addr: string;
+  to_addrs: string;
+  subject: string;
+  snippet: string;
+  received_at: string;
+  read: boolean;
+  trashed: boolean;
+}
+
+export interface MailFolderCounts {
+  inbox: number;
+  sent: number;
+  drafts: number;
+  trash: number;
+  inbox_unread: number;
+}
+
+export interface MailListResponse {
+  messages: MailMessageListItem[];
+  counts: MailFolderCounts;
+}
+
+export interface MailMessageDetail extends MailMessageListItem {
+  body_text: string;
+  in_reply_to_id: string | null;
+  read_at: string | null;
+}
+
+export interface MailDraft {
+  id: string;
+  inbound_message_id: string | null;
+  run_id: string | null;
+  to_addr: string;
+  subject: string;
+  body: string;
+  status: "draft" | "sent" | "discarded";
+  sent_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SyncResult {
+  synced: number;
+  skipped_duplicates: number;
+  errors: string[];
+}
+
+export interface GenerateDraftsResult {
+  run_id: string;
+  status: string;
+  draft_ids: string[];
+  errors: string[];
+}
