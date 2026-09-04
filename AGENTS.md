@@ -288,7 +288,11 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 
 - **pgvector 0.8.6 is live** on the Neon branch (enabled 2026-09-04).
 
-- **Gemini embeddings need explicit `dimensions=1536`** (default is 3072).
+- **2026-09-04 — Phase 1 data model.** 14 ORM models in `db/models.py`, 8 new tables
+  (leads, knowledge_documents, knowledge_chunks, user_llm_config, user_embedding_config,
+  user_email_config, agent_events, outreach_drafts). pgvector `vector(1536)` column +
+  IVFFlat index. Postgres auto-names FKs as `{table}_{col}_fkey` regardless of the name
+  passed to `op.create_foreign_key`.
   Phase 3's `embed.py` must pass `dimensions=1536` when calling the OpenAI-compatible
   embeddings endpoint. Decision D2 fixes the column at `vector(1536)`.
 
@@ -318,7 +322,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | Phase | Name | Status | Summary |
 |-------|------|--------|---------|
 | 0 | Audit, foundation & environment | ✅ Complete | [phase-0-foundation.md](summery/phase-0-foundation.md) |
-| 1 | Data model & migrations | ⬜ Not started | — |
+| 1 | Data model & migrations | ✅ Complete | [phase-1-data-model.md](summery/phase-1-data-model.md) |
 | 2 | Per-user config, crypto & settings API | ⬜ Not started | — |
 | 3 | RAG pipeline & knowledge API | ⬜ Not started | — |
 | 4 | Autonomous sales agent & tools | ⬜ Not started | — |
