@@ -333,7 +333,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | 5 | Leads, analyze & run/trace APIs | ✅ Complete | [phase-5-leads-runs-api.md](summery/phase-5-leads-runs-api.md) |
 | 6 | Demo seed data | ⚠️ Complete with known gaps | [phase-6-seed-data.md](summery/phase-6-seed-data.md) |
 | 7 | Next.js scaffold, auth & app shell | ✅ Complete | [phase-7-nextjs-shell.md](summery/phase-7-nextjs-shell.md) |
-| 8 | Dashboard, leads & live analysis UI | ⬜ Not started | — |
+| 8 | Dashboard, leads & live analysis UI | ✅ Complete | [phase-8-dashboard-leads-ui.md](summery/phase-8-dashboard-leads-ui.md) |
 | 9 | Knowledge, run detail & settings UI | ⬜ Not started | — |
 | 10 | Isolation verification, E2E demo & polish | ⬜ Not started | — |
 
