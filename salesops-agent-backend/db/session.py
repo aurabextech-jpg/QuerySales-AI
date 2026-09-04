@@ -1,3 +1,5 @@
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from core.config import settings
 
@@ -28,7 +30,22 @@ def _build_database_url() -> str:
             "driver itself, so keep asyncpg here."
         )
     # asyncpg spells the SSL query parameter 'ssl', not psycopg2's 'sslmode'.
-    return db_url.replace("sslmode=", "ssl=")
+    parsed = urlparse(db_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+
+    # Rename psycopg2's sslmode → asyncpg's ssl.
+    if "sslmode" in params:
+        params["ssl"] = params.pop("sslmode")
+
+    # Drop libpq-only parameters that asyncpg does not recognise.
+    # Neon's console sometimes appends channel_binding; asyncpg raises
+    # "unexpected keyword argument 'channel_binding'" on connect.
+    _LIBPQ_ONLY = {"channel_binding", "gssencmode", "krbsrvname", "gsslib"}
+    for key in _LIBPQ_ONLY:
+        params.pop(key, None)
+
+    clean_query = urlencode(params, doseq=True)
+    return urlunparse(parsed._replace(query=clean_query))
 
 
 engine = create_async_engine(

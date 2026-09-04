@@ -131,7 +131,10 @@ and never copy React Native code verbatim into the web app.
 - `except Exception as exc:` — never a bare `except:`. Log with `exc_info=True`.
 - Schema changes go through Alembic: edit `db/models.py`, `alembic revision --autogenerate`,
   **read the generated SQL**, then `alembic upgrade head`. Never hand-write DDL into app code.
-- New third-party packages go in **both** `pyproject.toml` and `requirements.txt`.
+- New third-party packages go in `pyproject.toml` (direct deps only). Then
+  `uv lock` and `uv export --no-dev --no-hashes --no-annotate --no-emit-project
+  --format requirements-txt -o requirements.txt`. Vercel's `@vercel/python`
+  builder installs from `requirements.txt`, not `pyproject.toml`.
 - Module names are `snake_case`; tools live in `mcp_tools/`, agent logic in `agent_core/`.
 
 ### Frontend (Next.js / TypeScript / Tailwind)
@@ -241,24 +244,23 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   (EdDSA) in `core/security.py:get_current_user`, and upserts the user row on first sight.
   `salesopsapp/src/services/authService.ts` is the working reference implementation.
 
-- **`openai-agents` is missing from `requirements.txt`.** It is declared in `pyproject.toml`
-  (`openai-agents>=0.17.2`) and imported by `agent_core/orchestrator.py`. Any deploy that
-  installs from `requirements.txt` will fail at import. Fix in Phase 0.
+- **`openai-agents` was missing from `requirements.txt`.** Fixed in Phase 0 —
+  `requirements.txt` is now exported from `uv.lock` (direct deps declared in
+  `pyproject.toml`). Any new dependency: add to `pyproject.toml`, `uv lock`,
+  `uv export … -o requirements.txt`.
 
 - **The existing crypto helper is Fernet, not AES-256-GCM.** `core/security.py` exposes
   `encrypt_token` / `decrypt_token` backed by `cryptography.fernet.Fernet` (AES-128-CBC + HMAC),
   used today only for `users.google_refresh_token`. plan.md §45 requires AES-256-GCM for the new
   per-user credential columns. Keep the Fernet path for the legacy column; do not retrofit it.
 
-- **`.claude/rules/code-style.md` and `.agents/rules/code-style.md` are stale and describe a
-  different repository** (a Next.js 16 + Drizzle + Neon serverless-driver project with an
-  `agent-service/` directory, `lib/*-db.ts` modules and a `ResponseBuilder`). None of those paths
-  exist here. They load automatically as project instructions, so they actively mislead. Phase 0
-  rewrites them to match this repo; until then, **this file overrides them**.
+- **`.claude/rules/code-style.md` and `.agents/rules/code-style.md` were stale**
+  and described a different repository. Rewritten in Phase 0 to describe this
+  repo (FastAPI + Next.js). They must stay byte-identical; both defer to this file.
 
-- **This is not a git repository.** There is no history to consult and no branch safety net.
-  Changes are irreversible unless a copy is made first — be deliberate before overwriting or
-  deleting.
+- **Git initialised** with baseline commit `d1ef5f8` (2026-09-04). Commit after
+  every phase boundary. `.gitignore` covers `.env`, `.venv/`, `node_modules/`,
+  `.next/`, `.mypy_cache/`, `__pycache__/`.
 
 - **Vercel's Python runtime buffers responses**, so true SSE streaming is impossible on the
   deployed backend. `run_orchestrator_with_events` exists precisely because of this: it collects
@@ -267,6 +269,28 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 
 - **`WorkflowStep` (`workflow_steps` table) is defined but unused** by any code path. Leave it
   alone; do not build on it.
+
+- **`uv` manages the Python environment.** `.venv/` is created by `uv sync`; run
+  Python via `.venv/Scripts/Activate.ps1` (PowerShell) or `uv run python`.
+  `pyproject.toml` declares direct deps only; `uv.lock` resolves the full tree;
+  `requirements.txt` is the lock export for Vercel. All three must stay in sync.
+
+- **One `ENCRYPTION_KEY` serves both Fernet and AES-256-GCM.** A Fernet key is
+  url-safe-base64(32 bytes) which is exactly the 256-bit key `AESGCM` needs.
+  Phase 2's `core/crypto.py` decodes with `base64.urlsafe_b64decode`. Losing the
+  key makes every stored credential permanently unrecoverable.
+
+- **Neon console `DATABASE_URL` uses `postgresql://` (sync) and appends
+  `channel_binding=require` (libpq-only).** Both break asyncpg. `db/session.py`
+  normalises automatically: swaps scheme to `postgresql+asyncpg://`, renames
+  `sslmode` → `ssl`, and strips `channel_binding` / `gssencmode` / `krbsrvname`
+  / `gsslib`. Alembic does its own swap in `alembic/env.py`.
+
+- **pgvector 0.8.6 is live** on the Neon branch (enabled 2026-09-04).
+
+- **Gemini embeddings need explicit `dimensions=1536`** (default is 3072).
+  Phase 3's `embed.py` must pass `dimensions=1536` when calling the OpenAI-compatible
+  embeddings endpoint. Decision D2 fixes the column at `vector(1536)`.
 
 ---
 
@@ -282,6 +306,8 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | D4 | The browser never calls FastAPI directly. The session JWT lives in an **httpOnly cookie**; Next.js server components and route handlers attach it as a Bearer token server-side. | Keeps the token out of browser JS, satisfies plan.md §30, and gives one place to handle 401s. Costs one extra hop, which is irrelevant at demo scale. |
 | D5 | Leads live in **our Postgres**, user-scoped — not in ERPNext. ERPNext stays an optional *outbound* tool (create opportunity / push lead). | plan.md §49 requires per-user lead isolation, which a single shared ERPNext instance cannot provide. It also removes ERPNext availability as a demo blocker. |
 | D6 | The live analysis timeline is driven by **polling** `GET /api/runs/{id}/events`, not SSE. | Vercel's Python runtime buffers responses (see §7). Polling works identically locally and deployed. |
+| D7 | **One `ENCRYPTION_KEY`** serves both Fernet (legacy) and AES-256-GCM (new `core/crypto.py`). | A Fernet key is url-safe-base64(32 bytes), which is exactly the 256-bit key AESGCM needs. One key, one failure mode. Losing it makes every stored credential permanently unrecoverable. |
+| D8 | `requirements.txt` is **exported from `uv.lock`**, never hand-maintained. | Vercel's `@vercel/python` builder reads `requirements.txt`. Lock-export guarantees local == deployed and prevents the drift that caused the missing `openai-agents` crash. |
 
 ---
 
@@ -291,7 +317,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 
 | Phase | Name | Status | Summary |
 |-------|------|--------|---------|
-| 0 | Audit, foundation & environment | ⬜ Not started | — |
+| 0 | Audit, foundation & environment | ✅ Complete | [phase-0-foundation.md](summery/phase-0-foundation.md) |
 | 1 | Data model & migrations | ⬜ Not started | — |
 | 2 | Per-user config, crypto & settings API | ⬜ Not started | — |
 | 3 | RAG pipeline & knowledge API | ⬜ Not started | — |
