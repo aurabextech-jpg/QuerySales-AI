@@ -11,13 +11,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import {
-  CheckCircle2Icon,
-  InfoIcon,
-  PlugZapIcon,
-  SaveIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { CheckCircle2Icon, PlugZapIcon, SaveIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,7 +37,6 @@ export function IntegrationCard({ integration }: { integration: Integration }) {
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
 
   const disabled = busy !== null;
-  const usingFallback = integration.configured && integration.source === "env";
 
   function set(name: string, value: string) {
     setValues((v) => ({ ...v, [name]: value }));
@@ -153,14 +146,6 @@ export function IntegrationCard({ integration }: { integration: Integration }) {
       </CardHeader>
 
       <CardContent>
-        {usingFallback && (
-          <p className="mb-4 flex items-start gap-1.5 text-xs text-fg-muted">
-            <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
-            Currently using the system-wide fallback. Save your own credentials
-            below to use an account you control.
-          </p>
-        )}
-
         {Object.keys(integration.masked).length > 0 && (
           <div className="mb-4 space-y-1">
             {Object.entries(integration.masked).map(([name, mask]) => (
@@ -229,7 +214,7 @@ export function IntegrationCard({ integration }: { integration: Integration }) {
               <PlugZapIcon />
               {busy === "test" ? "Testing…" : "Test connection"}
             </Button>
-            {integration.source === "user" && (
+            {integration.configured && (
               <Button
                 type="button"
                 variant="ghost"

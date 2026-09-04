@@ -259,16 +259,15 @@ more before committing to a plan.
    | `ENCRYPTION_KEY` | ✅ | Base64 32-byte key for AES-256-GCM |
    | `NEON_AUTH_URL` | ✅ | Neon Auth base URL |
    | `NEON_AUTH_JWKS_URL` | ✅ | JWKS endpoint for JWT verification |
-   | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` | ○ | Optional system fallback when a user has not configured their own |
-   | `EMBEDDING_BASE_URL` · `EMBEDDING_API_KEY` · `EMBEDDING_MODEL` | ○ | Same, for embeddings |
-   | `ERPNEXT_*` · `GOOGLE_PLACES_API_KEY` · `GOOGLE_CALENDAR_*` · `GMAIL_*` | ○ | Same, for the third-party integrations |
+   | `GOOGLE_SITE_VERIFICATION` | ○ | Meta tag for the public landing pages |
 
-   > [!NOTE]
-   > **Every credential above is optional.** LLM, embedding, email and all
-   > third-party integrations are configured per user from **Settings**, stored
-   > AES-256-GCM encrypted, and resolved at run time. These env vars exist only
-   > as a system-wide fallback for users who have not set up their own —
-   > leave them empty to require every user to bring their own credentials.
+   > [!IMPORTANT]
+   > **That is the whole file — there are no API keys in it.** LLM, embeddings,
+   > email, ERPNext, Google Places and Google Calendar are all configured by
+   > each user from **Settings**, stored AES-256-GCM encrypted against their
+   > account, and resolved per request. The server holds no shared credential
+   > and no fallback, so one user's keys can never be spent by another
+   > (plan §54 Option A).
 
    API docs are then at **http://localhost:8000/docs**.
 

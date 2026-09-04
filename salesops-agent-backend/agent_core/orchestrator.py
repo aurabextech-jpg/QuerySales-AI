@@ -25,7 +25,8 @@ from agents import (
 )
 from agents.tracing import set_trace_processors
 
-from core.config import settings
+from agent_core.model_factory import build_model
+from core.user_config import ResolvedLLMConfig
 from agent_core.tracing import DatabaseTracingProcessor, current_run_id, flush_pending_writes
 
 logger = logging.getLogger(__name__)
@@ -34,45 +35,10 @@ logger = logging.getLogger(__name__)
 
 set_trace_processors([DatabaseTracingProcessor()])
 
-# ── Model factory ────────────────────────────────────────────────────────
-
-
-def _make_model(api_key: str, base_url: str, model_name: str):
-    """Create an OpenAI-compatible model instance."""
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-    return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
-
-
-# Gemini tiers
-model_heavy = _make_model(
-    settings.GEMINI_API_KEY,
-    settings.GEMINI_BASE_URL,
-    settings.GEMINI_MODEL_HEAVY,
-)
-model_medium = _make_model(
-    settings.GEMINI_API_KEY,
-    settings.GEMINI_BASE_URL,
-    settings.GEMINI_MODEL_MEDIUM,
-)
-
-# OpenRouter (CRM agent) — falls back to Gemini light if no key is set
-if settings.OPENROUTER_API_KEY:
-    model_openrouter = _make_model(
-        settings.OPENROUTER_API_KEY,
-        settings.OPENROUTER_BASE_URL,
-        settings.OPENROUTER_MODEL,
-    )
-    logger.info("CRM agent using OpenRouter: %s", settings.OPENROUTER_MODEL)
-else:
-    model_openrouter = _make_model(
-        settings.GEMINI_API_KEY,
-        settings.GEMINI_BASE_URL,
-        settings.GEMINI_MODEL_LIGHT,
-    )
-    logger.info(
-        "No OPENROUTER_API_KEY — CRM agent falling back to %s",
-        settings.GEMINI_MODEL_LIGHT,
-    )
+# ── Models ───────────────────────────────────────────────────────────────
+# There are no module-level model singletons and no global API key: every run
+# builds its agents from the authenticated user's own LLM configuration
+# (rule §3.4, plan §54 Option A). See build_orchestrator() below.
 
 
 # ── Agent Context ────────────────────────────────────────────────────────
@@ -335,97 +301,7 @@ async def create_event_tool(
     }, context=wrapper.context)
 
 
-# ── Sub-agents (each with its own model tier) ────────────────────────────
-
-lead_gen_agent = Agent[AgentContext](
-    name="LeadGenAgent",
-    model=model_medium,  # gemini-2.5-flash
-    model_settings=ModelSettings(include_usage=True),
-    instructions=(
-        "You are a specialized Lead Generation Agent. Your job is to discover and enrich potential business leads.\n\n"
-        "## Search Strategy\n"
-        "1. Use `search_leads_multi_tool` for broad discovery based on industry and location.\n"
-        "2. Use `search_businesses_tool` for targeted single-query searches when the user is specific.\n"
-        "3. Enrich top prospects using `get_place_details_tool` to gather phone, website, and address.\n\n"
-        "## Opportunity Scoring\n"
-        "Assign an opportunity score (High / Medium / Low) to each lead based on:\n"
-        "- **High**: Rating ≥ 4.0, review count ≥ 100, has website and phone.\n"
-        "- **Medium**: Rating ≥ 3.5 OR review count ≥ 50, has at least one contact method.\n"
-        "- **Low**: Everything else.\n\n"
-        "## Output Rules\n"
-        "- NEVER use markdown tables. Present each lead as a bold-titled bullet list.\n"
-        "- Format: **Lead Name** followed by indented details (address, rating, phone, website, opportunity score).\n"
-        "- Group leads by opportunity score: High first, then Medium, then Low.\n"
-        "- Always suggest which leads the user should add to their CRM and offer to do it for them.\n"
-    ),
-    tools=[search_leads_multi_tool, search_businesses_tool, get_place_details_tool],
-)
-
-crm_agent = Agent[AgentContext](
-    name="CRMAgent",
-    model=model_openrouter,  # OpenRouter z-ai/glm-4.5-air:free (or Gemini-lite fallback)
-    model_settings=ModelSettings(include_usage=True),
-    instructions=(
-        "You are a specialized CRM Management Agent operating ERPNext.\n\n"
-        "## Core Capabilities\n"
-        "1. Create leads using `create_erpnext_lead_tool`.\n"
-        "2. Update existing leads with `update_erpnext_lead_tool`.\n"
-        "3. Read lead details with `read_erpnext_lead_tool`.\n"
-        "4. Analyze pipeline health and insights with `analyze_crm_data_tool`.\n"
-        "5. Generate chatbot links with `get_chatbot_link_tool`.\n\n"
-        "## Output Rules\n"
-        "- NEVER use markdown tables. Use bold headings and bullet points.\n"
-        "- When listing leads, present each as: **Lead Name** — Status: X, Source: Y, Created: Z.\n"
-        "- When showing pipeline analysis, use bold labels: **Open**: 18, **Replied**: 10, etc.\n"
-        "- After creating or updating a lead, confirm the action with the lead ID and key details.\n"
-        "- Proactively suggest next actions (e.g., 'Would you like to schedule a follow-up?').\n"
-    ),
-    tools=[
-        create_erpnext_lead_tool, read_erpnext_lead_tool,
-        update_erpnext_lead_tool, analyze_crm_data_tool, get_chatbot_link_tool,
-    ],
-)
-
-outreach_agent = Agent[AgentContext](
-    name="OutreachAgent",
-    model=model_medium,  # gemini-2.5-flash
-    model_settings=ModelSettings(include_usage=True),
-    instructions=(
-        "You are a specialized Outreach Agent focused on communications and scheduling.\n"
-        "You have access to REAL tools that interact with LIVE services. You MUST call them — NEVER fabricate or hallucinate results.\n\n"
-        "## CRITICAL RULES\n"
-        "1. You MUST call the actual tools provided to you. NEVER make up calendar data, email confirmations, or event links.\n"
-        "2. If a tool returns an error, report the EXACT error to the user. Do NOT pretend the action succeeded.\n"
-        "3. If a tool is unavailable or credentials are missing, tell the user to connect their Google Calendar first.\n\n"
-        "## Email Strategy\n"
-        "1. Draft and send emails using `send_email_tool`.\n"
-        "2. Write professional, concise emails with a clear subject line and call-to-action.\n\n"
-        "## Calendar & Scheduling Strategy (MANDATORY WORKFLOW)\n"
-        "When the user asks to schedule a meeting, check availability, or create an event, follow this EXACT workflow:\n\n"
-        "### Step 1: Check Availability\n"
-        "ALWAYS call `check_availability_tool` FIRST with the target date.\n"
-        "- Parameter `date`: MUST be in 'YYYY-MM-DD' format (e.g., '2026-05-20'). Convert relative dates like 'tomorrow' or 'next Monday' to absolute dates.\n"
-        "- Parameter `timezone`: Default 'Asia/Karachi'.\n"
-        "- The tool returns real busy_slots from the user's Google Calendar. Report these to the user.\n\n"
-        "### Step 2: Create Event (only after Step 1)\n"
-        "Call `create_event_tool` with these parameters:\n"
-        "- `summary`: A descriptive title (e.g., 'Sales Demo — Al-Shifa Clinic').\n"
-        "- `start_datetime`: ISO-8601 format WITHOUT timezone suffix: 'YYYY-MM-DDTHH:MM:SS' (e.g., '2026-05-20T10:00:00').\n"
-        "- `end_datetime`: Same format. If not specified, omit it (defaults to 1 hour after start).\n"
-        "- `description`: Meeting notes or agenda.\n"
-        "- `timezone`: 'Asia/Karachi' (default).\n"
-        "- `attendee_emails`: List of email strings to invite.\n\n"
-        "### Step 3: Confirm to User\n"
-        "After the tool returns, report the ACTUAL result:\n"
-        "- Event title, start/end time, attendees, and the Google Calendar link (html_link).\n"
-        "- If the tool returned an error, show the error — do NOT make up a fake confirmation.\n\n"
-        "## Output Rules\n"
-        "- NEVER use markdown tables. Use bold headings and bullet points.\n"
-        "- Always confirm actions with REAL data from tool responses.\n"
-        "- NEVER invent event IDs, calendar links, or time slots.\n"
-    ),
-    tools=[send_email_tool, check_availability_tool, create_event_tool],
-)
+# ── Agent factory ────────────────────────────────────────────────────────
 
 SALES_AGENT_SYSTEM_PROMPT = """\
 Role: SalesOps Orchestrator — autonomous lead-gen specialist + ERPNext CRM operator.
@@ -492,31 +368,132 @@ IF intent unclear OR missing params (industry, city, lead-ID):
 - Always pass the user's exact date/time intent to `outreach`. Resolve relative dates (e.g., 'tomorrow') to absolute dates BEFORE delegating.
 """
 
-orchestrator_agent = Agent[AgentContext](
-    name="SalesOpsOrchestrator",
-    model=model_heavy,  # gemini-2.5-pro — complex multi-step reasoning
-    model_settings=ModelSettings(include_usage=True),
-    instructions=SALES_AGENT_SYSTEM_PROMPT,
+
+def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
+    """Build the orchestrator and its sub-agents for one user, one run.
+
+    All four agents share the caller's single configured model. The old
+    heavy/medium/light tiering is gone with the global keys: a user
+    configures one provider, so there is only one model to route to.
+    """
+    model = build_model(llm_cfg)
+    model_settings = ModelSettings(include_usage=True)
+
+    lead_gen_agent = Agent[AgentContext](
+    name="LeadGenAgent",
+    model=model,
+    model_settings=model_settings,
+    instructions=(
+        "You are a specialized Lead Generation Agent. Your job is to discover and enrich potential business leads.\n\n"
+        "## Search Strategy\n"
+        "1. Use `search_leads_multi_tool` for broad discovery based on industry and location.\n"
+        "2. Use `search_businesses_tool` for targeted single-query searches when the user is specific.\n"
+        "3. Enrich top prospects using `get_place_details_tool` to gather phone, website, and address.\n\n"
+        "## Opportunity Scoring\n"
+        "Assign an opportunity score (High / Medium / Low) to each lead based on:\n"
+        "- **High**: Rating ≥ 4.0, review count ≥ 100, has website and phone.\n"
+        "- **Medium**: Rating ≥ 3.5 OR review count ≥ 50, has at least one contact method.\n"
+        "- **Low**: Everything else.\n\n"
+        "## Output Rules\n"
+        "- NEVER use markdown tables. Present each lead as a bold-titled bullet list.\n"
+        "- Format: **Lead Name** followed by indented details (address, rating, phone, website, opportunity score).\n"
+        "- Group leads by opportunity score: High first, then Medium, then Low.\n"
+        "- Always suggest which leads the user should add to their CRM and offer to do it for them.\n"
+    ),
+    tools=[search_leads_multi_tool, search_businesses_tool, get_place_details_tool],
+    )
+
+    crm_agent = Agent[AgentContext](
+    name="CRMAgent",
+    model=model,
+    model_settings=model_settings,
+    instructions=(
+        "You are a specialized CRM Management Agent operating ERPNext.\n\n"
+        "## Core Capabilities\n"
+        "1. Create leads using `create_erpnext_lead_tool`.\n"
+        "2. Update existing leads with `update_erpnext_lead_tool`.\n"
+        "3. Read lead details with `read_erpnext_lead_tool`.\n"
+        "4. Analyze pipeline health and insights with `analyze_crm_data_tool`.\n"
+        "5. Generate chatbot links with `get_chatbot_link_tool`.\n\n"
+        "## Output Rules\n"
+        "- NEVER use markdown tables. Use bold headings and bullet points.\n"
+        "- When listing leads, present each as: **Lead Name** — Status: X, Source: Y, Created: Z.\n"
+        "- When showing pipeline analysis, use bold labels: **Open**: 18, **Replied**: 10, etc.\n"
+        "- After creating or updating a lead, confirm the action with the lead ID and key details.\n"
+        "- Proactively suggest next actions (e.g., 'Would you like to schedule a follow-up?').\n"
+    ),
     tools=[
-        lead_gen_agent.as_tool(
-            tool_name="lead_generation",
-            tool_description="Discover and enrich leads",
-        ),
-        crm_agent.as_tool(
-            tool_name="crm_management",
-            tool_description="Manage and analyze CRM data",
-        ),
-        outreach_agent.as_tool(
-            tool_name="outreach",
-            tool_description=(
-                "Draft and send emails, check REAL Google Calendar availability, "
-                "and create REAL calendar events. Delegate here for ANY scheduling, "
-                "meeting, availability, or email task. This agent calls live APIs — "
-                "it does NOT simulate or fabricate results."
-            ),
-        ),
+        create_erpnext_lead_tool, read_erpnext_lead_tool,
+        update_erpnext_lead_tool, analyze_crm_data_tool, get_chatbot_link_tool,
     ],
-)
+    )
+
+    outreach_agent = Agent[AgentContext](
+    name="OutreachAgent",
+    model=model,
+    model_settings=model_settings,
+    instructions=(
+        "You are a specialized Outreach Agent focused on communications and scheduling.\n"
+        "You have access to REAL tools that interact with LIVE services. You MUST call them — NEVER fabricate or hallucinate results.\n\n"
+        "## CRITICAL RULES\n"
+        "1. You MUST call the actual tools provided to you. NEVER make up calendar data, email confirmations, or event links.\n"
+        "2. If a tool returns an error, report the EXACT error to the user. Do NOT pretend the action succeeded.\n"
+        "3. If a tool is unavailable or credentials are missing, tell the user to connect their Google Calendar first.\n\n"
+        "## Email Strategy\n"
+        "1. Draft and send emails using `send_email_tool`.\n"
+        "2. Write professional, concise emails with a clear subject line and call-to-action.\n\n"
+        "## Calendar & Scheduling Strategy (MANDATORY WORKFLOW)\n"
+        "When the user asks to schedule a meeting, check availability, or create an event, follow this EXACT workflow:\n\n"
+        "### Step 1: Check Availability\n"
+        "ALWAYS call `check_availability_tool` FIRST with the target date.\n"
+        "- Parameter `date`: MUST be in 'YYYY-MM-DD' format (e.g., '2026-05-20'). Convert relative dates like 'tomorrow' or 'next Monday' to absolute dates.\n"
+        "- Parameter `timezone`: Default 'Asia/Karachi'.\n"
+        "- The tool returns real busy_slots from the user's Google Calendar. Report these to the user.\n\n"
+        "### Step 2: Create Event (only after Step 1)\n"
+        "Call `create_event_tool` with these parameters:\n"
+        "- `summary`: A descriptive title (e.g., 'Sales Demo — Al-Shifa Clinic').\n"
+        "- `start_datetime`: ISO-8601 format WITHOUT timezone suffix: 'YYYY-MM-DDTHH:MM:SS' (e.g., '2026-05-20T10:00:00').\n"
+        "- `end_datetime`: Same format. If not specified, omit it (defaults to 1 hour after start).\n"
+        "- `description`: Meeting notes or agenda.\n"
+        "- `timezone`: 'Asia/Karachi' (default).\n"
+        "- `attendee_emails`: List of email strings to invite.\n\n"
+        "### Step 3: Confirm to User\n"
+        "After the tool returns, report the ACTUAL result:\n"
+        "- Event title, start/end time, attendees, and the Google Calendar link (html_link).\n"
+        "- If the tool returned an error, show the error — do NOT make up a fake confirmation.\n\n"
+        "## Output Rules\n"
+        "- NEVER use markdown tables. Use bold headings and bullet points.\n"
+        "- Always confirm actions with REAL data from tool responses.\n"
+        "- NEVER invent event IDs, calendar links, or time slots.\n"
+    ),
+    tools=[send_email_tool, check_availability_tool, create_event_tool],
+    )
+
+    return Agent[AgentContext](
+        name="SalesOpsOrchestrator",
+        model=model,
+        model_settings=model_settings,
+        instructions=SALES_AGENT_SYSTEM_PROMPT,
+        tools=[
+            lead_gen_agent.as_tool(
+                tool_name="lead_generation",
+                tool_description="Discover and enrich leads",
+            ),
+            crm_agent.as_tool(
+                tool_name="crm_management",
+                tool_description="Manage and analyze CRM data",
+            ),
+            outreach_agent.as_tool(
+                tool_name="outreach",
+                tool_description=(
+                    "Draft and send emails, check REAL Google Calendar availability, "
+                    "and create REAL calendar events. Delegate here for ANY scheduling, "
+                    "meeting, availability, or email task. This agent calls live APIs — "
+                    "it does NOT simulate or fabricate results."
+                ),
+            ),
+        ],
+    )
 
 
 # ── Helper: build full prompt from message history ───────────────────────
@@ -577,6 +554,7 @@ async def _update_run_status(run_id: str, status: str) -> None:
 async def run_orchestrator(
     messages: list,
     *,
+    llm_config: ResolvedLLMConfig,
     run_id: str | None = None,
     google_refresh_token: str | None = None,
     integrations: dict | None = None,
@@ -593,7 +571,7 @@ async def run_orchestrator(
             google_calendar=creds.get("google_calendar"),
         )
         result = await Runner.run(
-            starting_agent=orchestrator_agent,
+            starting_agent=build_orchestrator(llm_config),
             input=_build_input(messages),
             context=context,
         )
@@ -621,6 +599,7 @@ from db.session import AsyncSessionLocal
 async def run_orchestrator_with_events(
     messages: list,
     *,
+    llm_config: ResolvedLLMConfig,
     run_id: str | None = None,
     google_refresh_token: str | None = None,
     integrations: dict | None = None,
@@ -654,7 +633,7 @@ async def run_orchestrator_with_events(
             google_calendar=creds.get("google_calendar"),
         )
         result = Runner.run_streamed(
-            starting_agent=orchestrator_agent,
+            starting_agent=build_orchestrator(llm_config),
             input=_build_input(messages),
             context=context,
         )

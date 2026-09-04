@@ -1,12 +1,15 @@
-"""Per-user configuration resolution (plan §52, §54).
+"""Per-user configuration resolution (plan §52, §54 Option A).
 
-Resolution order for each config type:
-    1. The authenticated user's DB row (decrypted server-side).
-    2. Optional system-fallback env vars (``LLM_*``, ``EMBEDDING_*``).
-    3. Raise :class:`ConfigurationMissing` → 400 with an actionable message.
+Every credential belongs to one authenticated user. There is no shared API key
+and no environment fallback: a config is either in that user's row or it is
+not configured.
 
-The returned dataclasses carry *decrypted* values.  They never cross a
-response boundary — they exist only for the duration of one request.
+    user's DB row (decrypted server-side)
+        └── missing → ConfigurationMissing (400) for required config,
+                      or None for optional integrations
+
+The returned dataclasses carry *decrypted* values. They never cross a response
+boundary — they exist only for the duration of one request.
 """
 
 from __future__ import annotations
@@ -18,9 +21,8 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from core.config import settings
 from core.crypto import decrypt_secret
-from core.integrations import IntegrationSpec, env_defaults, get_spec
+from core.integrations import IntegrationSpec, get_spec
 from db.models import (
     User,
     UserEmailConfig,
@@ -36,9 +38,9 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigurationMissing(Exception):
-    """Raised when neither the user row nor the env fallback provides a value.
+    """Raised when the user has not configured a required provider.
 
-    Mapped to a 400 with an actionable message — never a 500.
+    Mapped to a 400 with an actionable message pointing at Settings — never a 500.
     """
 
     def __init__(self, message: str) -> None:
@@ -98,17 +100,9 @@ async def resolve_llm_config(user_id: str, db: AsyncSession) -> ResolvedLLMConfi
             max_tokens=row.max_tokens or 4096,
         )
 
-    # System fallback
-    if settings.LLM_BASE_URL and settings.LLM_API_KEY:
-        return ResolvedLLMConfig(
-            base_url=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
-            model=settings.LLM_MODEL,
-        )
-
     raise ConfigurationMissing(
         "LLM provider not configured. Go to Settings → AI / LLM and add your "
-        "provider details, or ask an administrator to set system-wide defaults."
+        "own OpenAI-compatible provider."
     )
 
 
@@ -132,15 +126,6 @@ async def resolve_embedding_config(
             dimension=row.dimension,
         )
 
-    # System fallback
-    if settings.EMBEDDING_BASE_URL and settings.EMBEDDING_API_KEY:
-        return ResolvedEmbeddingConfig(
-            base_url=settings.EMBEDDING_BASE_URL,
-            api_key=settings.EMBEDDING_API_KEY,
-            model=settings.EMBEDDING_MODEL,
-            dimension=settings.EMBEDDING_DIMENSION,
-        )
-
     raise ConfigurationMissing(
         "Embedding provider not configured. Go to Settings → Embeddings and "
         "add your provider details."
@@ -152,8 +137,8 @@ async def resolve_email_config(
 ) -> ResolvedEmailConfig | None:
     """Resolve the email config for *user_id*.
 
-    Returns ``None`` if neither the user row nor the env fallback is set.
-    Email is optional — the agent can still run, it just cannot send outreach.
+    Returns ``None`` when the user has not configured email. Email is optional —
+    the agent still runs, it just cannot send outreach.
     """
     result = await db.execute(
         select(UserEmailConfig).where(UserEmailConfig.user_id == user_id)
@@ -178,16 +163,6 @@ async def resolve_email_config(
             ),
         )
 
-    # System fallback: legacy Gmail env vars
-    if settings.GMAIL_USER and settings.GMAIL_APP_PASSWORD:
-        return ResolvedEmailConfig(
-            provider="gmail_smtp",
-            email_address=settings.GMAIL_USER,
-            smtp_host=settings.GMAIL_SMTP_HOST,
-            smtp_port=settings.GMAIL_SMTP_PORT,
-            smtp_password=settings.GMAIL_APP_PASSWORD,
-        )
-
     return None
 
 
@@ -204,7 +179,7 @@ class ResolvedIntegration:
 
     provider: str
     values: dict[str, str]
-    source: str  # "user" | "env"
+    source: str  # always "user" — there is no system-wide fallback
 
     def get(self, name: str, default: str = "") -> str:
         return self.values.get(name) or default
@@ -247,8 +222,6 @@ async def resolve_integration_config(
 ) -> ResolvedIntegration | None:
     """Resolve one integration for *user_id*.
 
-    Order: the user's row → optional env fallback → ``None``.
-
     Returns ``None`` rather than raising: every integration here is optional
     and must never block a response when unconfigured (Decision D5).
     """
@@ -271,10 +244,6 @@ async def resolve_integration_config(
         values.update(_decrypt_secrets(row, spec))
         if any(values.values()):
             return ResolvedIntegration(provider=provider, values=values, source="user")
-
-    fallback = env_defaults(spec)
-    if fallback:
-        return ResolvedIntegration(provider=provider, values=fallback, source="env")
 
     return None
 

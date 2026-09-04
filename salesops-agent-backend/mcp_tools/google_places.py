@@ -45,10 +45,8 @@ class GetPlaceDetailsInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _places_key(creds: Any = None) -> str:
-    """Per-user API key, falling back to the env setting."""
-    if creds is not None:
-        return creds.get("api_key")
-    return settings.GOOGLE_PLACES_API_KEY
+    """The caller's own API key. No environment fallback."""
+    return creds.get("api_key") if creds is not None else ""
 
 
 async def ping_places(creds: Any = None) -> dict[str, Any]:

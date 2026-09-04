@@ -91,8 +91,8 @@ async def _fetch_erpnext_pipeline(creds=None) -> PipelineStats:
     ERPNext is optional and must never block the dashboard (Decision D5):
     an unconfigured or unreachable instance yields empty stats.
     """
-    base_url = creds.get("base_url") if creds else settings.ERPNEXT_BASE_URL
-    token = creds.get("api_token") if creds else settings.ERPNEXT_API_TOKEN
+    base_url = creds.get("base_url") if creds else ""
+    token = creds.get("api_token") if creds else ""
 
     if not base_url or not token:
         return PipelineStats()

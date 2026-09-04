@@ -10,7 +10,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
 
-from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ async def send_email(
     to_email: str,
     subject: str,
     body: str,
+    creds: Any = None,
 ) -> dict[str, Any]:
     """Send an email via Gmail SMTP.
 
@@ -30,14 +30,21 @@ async def send_email(
     Returns:
         Dict with status and message.
     """
-    # ── Real SMTP send ────────────────────────────────────────────────────
-    gmail_user = settings.GMAIL_USER
-    gmail_password = settings.GMAIL_APP_PASSWORD
+    # Credentials come from the caller's own email configuration — there is
+    # no shared mailbox to fall back to (plan §54 Option A).
+    gmail_user = getattr(creds, "email_address", "") if creds else ""
+    gmail_password = getattr(creds, "smtp_password", "") if creds else ""
+    smtp_host = getattr(creds, "smtp_host", None) or "smtp.gmail.com"
+    smtp_port = getattr(creds, "smtp_port", None) or 587
 
     if not gmail_user or not gmail_password:
         return {
             "status": "error",
-            "message": "GMAIL_USER or GMAIL_APP_PASSWORD is not configured",
+            "reason": "not_configured",
+            "message": (
+                "No email account configured. Add your SMTP details in "
+                "Settings -> Email / Outreach."
+            ),
         }
 
     try:
@@ -47,13 +54,13 @@ async def send_email(
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
 
-        with smtplib.SMTP(settings.GMAIL_SMTP_HOST, settings.GMAIL_SMTP_PORT) as server:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
             server.ehlo()
             server.starttls()
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, to_email, msg.as_string())
 
-        logger.info("send_email: sent to %s", to_email)
+        logger.info("send_email: sent")
         return {
             "status": "success",
             "message": f"Email sent to {to_email}",

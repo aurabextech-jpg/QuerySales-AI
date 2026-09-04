@@ -215,8 +215,8 @@ export interface Integration {
   description: string;
   configured: boolean;
   enabled: boolean;
-  /** Where the active credentials come from — the user's row or env fallback. */
-  source: "user" | "env" | null;
+  /** "user" once configured, null otherwise. There is no shared fallback. */
+  source: "user" | null;
   fields: IntegrationField[];
   values: Record<string, string>;
   masked: Record<string, string>;

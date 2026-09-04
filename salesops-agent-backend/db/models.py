@@ -252,7 +252,7 @@ class KnowledgeChunk(Base):
 
 class UserLLMConfig(Base):
     """Per-user LLM provider configuration.  API key is AES-256-GCM encrypted
-    (Phase 2, Decision D3).  Resolution order: this row → env fallback → 400."""
+    (Phase 2, Decision D3).  This row is the only source — no env fallback."""
 
     __tablename__ = "user_llm_config"
 

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.security import get_current_user, encrypt_token
 from db.models import User
+from core.user_config import resolve_integration_config
 from db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -98,10 +99,21 @@ async def sync_google_calendar(
 
     Supports both Android and iOS platforms.
     """
-    if not all([settings.GOOGLE_CALENDAR_CLIENT_ID, settings.GOOGLE_CALENDAR_CLIENT_SECRET]):
+    # OAuth client credentials are per user (plan §54 Option A) — the user
+    # registers their own Google Cloud app in Settings -> Integrations.
+    cal_creds = await resolve_integration_config(
+        current_user.id, "google_calendar", db
+    )
+    client_id = cal_creds.get("client_id") if cal_creds else ""
+    client_secret = cal_creds.get("client_secret") if cal_creds else ""
+
+    if not client_id or not client_secret:
         raise HTTPException(
-            status_code=500,
-            detail="Google Calendar integration is not configured on the server.",
+            status_code=400,
+            detail=(
+                "Google Calendar is not configured. Add your OAuth client ID "
+                "and secret in Settings -> Integrations first."
+            ),
         )
 
     redirect_uri = _get_redirect_uri(request.platform, request.redirect_uri)
@@ -116,8 +128,8 @@ async def sync_google_calendar(
     # Always use the web client ID + secret for the server-side exchange
     token_payload = {
         "code": request.auth_code,
-        "client_id": settings.GOOGLE_CALENDAR_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CALENDAR_CLIENT_SECRET,
+        "client_id": client_id,
+        "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
     }
@@ -267,19 +279,29 @@ async def disconnect_calendar(
 
 
 @router.get("/config")
-async def get_calendar_config():
-    """Return platform-specific OAuth client IDs and scopes.
+async def get_calendar_config(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return this user's OAuth client ID and the scopes to request.
 
-    The mobile app calls this on startup to configure Google Sign-In
-    with the correct client ID for its platform (Android vs iOS).
+    The client ID comes from the user's own integration config — it is a
+    public identifier, not a secret, so returning it is safe. The client
+    secret never leaves the server.
     """
+    cal_creds = await resolve_integration_config(
+        current_user.id, "google_calendar", db
+    )
+    client_id = cal_creds.get("client_id") if cal_creds else None
+
     return {
+        "configured": bool(client_id),
         "android": {
-            "web_client_id": settings.GOOGLE_CALENDAR_CLIENT_ID,
+            "web_client_id": client_id,
             "scopes": CALENDAR_SCOPES,
         },
         "ios": {
-            "web_client_id": settings.GOOGLE_CALENDAR_CLIENT_ID,
+            "web_client_id": client_id,
             "ios_client_id": settings.GOOGLE_CALENDAR_IOS_CLIENT_ID or None,
             "scopes": CALENDAR_SCOPES,
         },

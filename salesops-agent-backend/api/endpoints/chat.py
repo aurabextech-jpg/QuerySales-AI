@@ -25,8 +25,10 @@ from agent_core.orchestrator import (
 )
 from core.security import get_current_user, decrypt_token
 from core.user_config import (
+    ConfigurationMissing,
     resolve_calendar_credentials,
     resolve_integration_config,
+    resolve_llm_config,
 )
 from db.models import User, WorkflowRun, ChatMessageLog
 from db.session import get_db
@@ -215,8 +217,11 @@ async def chat_with_agent(
         if user_text:
             await _save_message(db, run_id, "user", user_text)
 
+        llm_cfg = await resolve_llm_config(current_user.id, db)
+
         reply = await run_orchestrator(
             messages,
+            llm_config=llm_cfg,
             run_id=run_id,
             google_refresh_token=decrypt_token(current_user.google_refresh_token),
             integrations=await _resolve_integrations(current_user, db),
@@ -226,6 +231,8 @@ async def chat_with_agent(
         await _save_message(db, run_id, "assistant", reply)
 
         return ChatResponse(message=reply, run_id=run_id)
+    except ConfigurationMissing as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
     except Exception as exc:
         logger.error("chat_with_agent error: %s", exc, exc_info=True)
         raise HTTPException(
@@ -282,8 +289,11 @@ async def chat_stream(
         if user_text:
             await _save_message(db, run_id, "user", user_text)
 
+        llm_cfg = await resolve_llm_config(current_user.id, db)
+
         result = await run_orchestrator_with_events(
             messages,
+            llm_config=llm_cfg,
             run_id=run_id,
             google_refresh_token=decrypt_token(
                 current_user.google_refresh_token
@@ -303,6 +313,8 @@ async def chat_stream(
             "message": final_message,
         }
 
+    except ConfigurationMissing as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
     except Exception as exc:
         logger.error(
             "chat_stream error: %s", exc, exc_info=True

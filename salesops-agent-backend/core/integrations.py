@@ -1,20 +1,21 @@
 """Integration provider registry (plan §41 ``user_integration_config``).
 
 Declares, for every third-party integration, which fields it takes, which of
-those are secret, and which env var each falls back to. One table
+those are secret. One table
 (:class:`db.models.UserIntegrationConfig`) and one set of endpoints then serve
 every provider — adding another is a change to this file alone, no migration.
 
 Secrets declared here are AES-256-GCM encrypted at rest and never leave the
 server (plan §45-47). Non-secret fields — base URLs, client IDs — are stored
 in plain JSON so the settings UI can show them back to the user.
+
+There is no environment fallback: every user supplies their own credentials
+(plan §54 Option A).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
-from core.config import settings
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,6 @@ class IntegrationSpec:
     label: str
     description: str
     fields: tuple[IntegrationField, ...]
-    # field name → Settings attribute used as the optional system fallback
-    env_fallback: dict[str, str] = field(default_factory=dict)
 
     @property
     def secret_fields(self) -> tuple[str, ...]:
@@ -77,10 +76,6 @@ INTEGRATIONS: dict[str, IntegrationSpec] = {
                 help="ERPNext token in the form api_key:api_secret.",
             ),
         ),
-        env_fallback={
-            "base_url": "ERPNEXT_BASE_URL",
-            "api_token": "ERPNEXT_API_TOKEN",
-        },
     ),
     "google_places": IntegrationSpec(
         provider="google_places",
@@ -94,7 +89,6 @@ INTEGRATIONS: dict[str, IntegrationSpec] = {
                 placeholder="AIza…",
             ),
         ),
-        env_fallback={"api_key": "GOOGLE_PLACES_API_KEY"},
     ),
     "google_calendar": IntegrationSpec(
         provider="google_calendar",
@@ -123,11 +117,6 @@ INTEGRATIONS: dict[str, IntegrationSpec] = {
                 ),
             ),
         ),
-        env_fallback={
-            "client_id": "GOOGLE_CALENDAR_CLIENT_ID",
-            "client_secret": "GOOGLE_CALENDAR_CLIENT_SECRET",
-            "refresh_token": "GOOGLE_CALENDAR_REFRESH_TOKEN",
-        },
     ),
 }
 
@@ -139,15 +128,3 @@ def get_spec(provider: str) -> IntegrationSpec:
     return INTEGRATIONS[provider]
 
 
-def env_defaults(spec: IntegrationSpec) -> dict[str, str]:
-    """Values this provider would fall back to from the environment.
-
-    Empty strings are dropped so a half-configured fallback never masquerades
-    as a complete one.
-    """
-    out: dict[str, str] = {}
-    for field_name, attr in spec.env_fallback.items():
-        value = getattr(settings, attr, "") or ""
-        if value:
-            out[field_name] = value
-    return out

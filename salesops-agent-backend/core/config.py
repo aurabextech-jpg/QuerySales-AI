@@ -1,63 +1,43 @@
+"""Application settings — infrastructure only.
+
+There are deliberately **no** provider credentials here. LLM, embedding, email,
+ERPNext, Google Places and Google Calendar are configured per user from the
+dashboard, stored AES-256-GCM encrypted, and resolved at run time by
+``core/user_config.py`` (plan §54 Option A, rule §3.4).
+
+If you are looking for where to put an API key: you are not — the user enters
+it in Settings.
+"""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "SalesOps Agent"
-
-    # ── Database (Neon Postgres) ─────────────────────────────────────────
+    # ── Database (Neon Postgres + pgvector) ──────────────────────────────
+    # Must use the asyncpg driver; db/session.py normalises the Neon console
+    # URL (scheme, sslmode, channel_binding) on the way in.
     DATABASE_URL: str = ""
 
     # ── Neon Auth (Better Auth) ──────────────────────────────────────────
+    # Sign-in happens against Neon Auth; the backend only verifies the JWT
+    # against the JWKS endpoint. There is no local password table.
     NEON_AUTH_URL: str = ""
     NEON_AUTH_JWKS_URL: str = ""
 
-    # ── ERPNext ──────────────────────────────────────────────────────────
-    ERPNEXT_BASE_URL: str = ""
-    ERPNEXT_API_TOKEN: str = ""
-
-    # ── Google ───────────────────────────────────────────────────────────
-    GOOGLE_PLACES_API_KEY: str = ""
-    # Web client ID/secret — used for backend token exchange (Android + iOS)
-    GOOGLE_CALENDAR_CLIENT_ID: str = ""
-    GOOGLE_CALENDAR_CLIENT_SECRET: str = ""
-    # iOS-specific native client ID (created in Google Cloud Console → iOS app type)
-    GOOGLE_CALENDAR_IOS_CLIENT_ID: str = ""
-    GOOGLE_CALENDAR_REFRESH_TOKEN: str = ""
-
-    # ── Gmail SMTP ───────────────────────────────────────────────────────
-    GMAIL_USER: str = ""
-    GMAIL_APP_PASSWORD: str = ""
-    GMAIL_SMTP_HOST: str = "smtp.gmail.com"
-    GMAIL_SMTP_PORT: int = 587
-
-    # ── Gemini (tiered models via OpenAI-compatible endpoint) ────────────
-    GEMINI_API_KEY: str = ""
-    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    GEMINI_MODEL_HEAVY: str = "gemini-2.5-pro"          # orchestrator
-    GEMINI_MODEL_MEDIUM: str = "gemini-2.5-flash"       # lead gen, outreach
-    GEMINI_MODEL_LIGHT: str = "gemini-2.5-flash-lite"   # simple lookups
-
-    # ── OpenRouter (OpenAI-compatible, for CRM agent) ────────────────────
-    OPENROUTER_API_KEY: str = ""
-    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_MODEL: str = "z-ai/glm-4.5-air:free"
-
-    # ── System-fallback LLM / Embedding (Phase 2) ───────────────────────
-    # Used when a user has NOT configured their own per-user row.
-    # The resolution service (core/user_config.py) falls back to these.
-    LLM_BASE_URL: str = ""
-    LLM_API_KEY: str = ""
-    LLM_MODEL: str = "gemini-2.5-flash"
-    EMBEDDING_BASE_URL: str = ""
-    EMBEDDING_API_KEY: str = ""
-    EMBEDDING_MODEL: str = "gemini-embedding-001"
-    EMBEDDING_DIMENSION: int = 1536
-
     # ── Security ─────────────────────────────────────────────────────────
+    # One url-safe base64 32-byte key serving both AES-256-GCM (per-user
+    # credentials) and the legacy Fernet column (Decision D7). Never stored in
+    # Postgres, never logged. Losing it makes every stored credential
+    # permanently unrecoverable.
     ENCRYPTION_KEY: str = ""
 
-    # ── Verification ─────────────────────────────────────────────────────
-    GOOGLE_SITE_VERIFICATION: str = "bmcSvmYPsn3dPLi50H2NSQGPgpFFHJTvn0g7OUhw7BA"
+    # ── Deployment ───────────────────────────────────────────────────────
+    # Injected into the public landing/legal pages (api/endpoints/pages.py).
+    GOOGLE_SITE_VERIFICATION: str = ""
+
+    # OAuth client ID handed to the frozen React Native app by
+    # api/endpoints/calendar.py. Not a secret and unused by the web dashboard.
+    GOOGLE_CALENDAR_IOS_CLIENT_ID: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

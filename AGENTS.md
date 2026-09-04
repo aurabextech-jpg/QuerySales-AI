@@ -96,11 +96,18 @@ runs, outreach drafts, all configuration.
 - Never log: API keys, access/refresh tokens, `Authorization` headers, DB passwords,
   `ENCRYPTION_KEY`, or raw email bodies containing customer PII.
 
-### 3.4 No global LLM client
-Configuration is **per user**. The agent resolves LLM, embedding, and email configuration from
-the authenticated user's rows at run time. Module-level singleton model clients built from global
-env vars are forbidden in new code (`agent_core/orchestrator.py` currently does this for the chat
-agents — see the Phase 4 refactor).
+### 3.4 No shared credentials, anywhere
+**Every** credential is per user: LLM, embedding, email, ERPNext, Google Places, Google Calendar.
+The user enters it in Settings; it is stored AES-256-GCM encrypted against their account and
+resolved at run time from their rows.
+
+- There is **no environment fallback and no shared API key.** `core/config.py` carries
+  infrastructure only — `DATABASE_URL`, `ENCRYPTION_KEY`, the two Neon Auth URLs, and two
+  non-secret deployment values. Adding a provider credential to it is a bug (plan §54 Option A).
+- Module-level model clients are forbidden. Both agents build their models per run:
+  `agent_core/sales_agent.py` and `agent_core/orchestrator.py:build_orchestrator()`.
+- A missing required config is a **400 with an actionable message** pointing at Settings, never
+  a 500. A missing *optional* integration returns a `reason`, never raises.
 
 ### 3.5 Errors are handled, never leaked
 - Route handlers catch, log the real cause server-side with context, and return a generic message.
@@ -348,6 +355,25 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   source image ships opaque gray corners — regenerate variants with a
   rounded-rect alpha mask, not a plain resize.
 
+- **2026-09-04 — All shared credentials removed (Decision D9).** `core/config.py` now declares
+  six settings, none of them a provider key: `DATABASE_URL`, `ENCRYPTION_KEY`,
+  `NEON_AUTH_URL`, `NEON_AUTH_JWKS_URL`, `GOOGLE_SITE_VERIFICATION`,
+  `GOOGLE_CALENDAR_IOS_CLIENT_ID`. The `LLM_*`, `EMBEDDING_*`, `GEMINI_*`, `OPENROUTER_*`,
+  `ERPNEXT_*`, `GMAIL_*` and `GOOGLE_PLACES/CALENDAR` credential vars are **gone** — do not
+  reintroduce them. If a tool needs a credential it takes a `ResolvedIntegration`, and an
+  unconfigured caller gets a `not_configured` result rather than a shared key.
+
+- **The chat orchestrator no longer builds models at import.** `agent_core/orchestrator.py`
+  exposes `build_orchestrator(llm_cfg)`; `run_orchestrator()` and
+  `run_orchestrator_with_events()` both require `llm_config=`. Importing the module no longer
+  touches the network or needs any key, which is why the app now boots with an empty `.env`
+  beyond the four required values.
+
+- **`GOOGLE_CALENDAR_IOS_CLIENT_ID` is the one surviving Google value in env** — it is a public
+  OAuth client ID returned by `GET /api/calendar/config` to the frozen React Native app, not a
+  secret. The web dashboard never reads it. The calendar OAuth *exchange* uses the user's own
+  client id/secret from their integration config.
+
 ---
 
 ## 8. Decision Log
@@ -364,6 +390,9 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | D6 | The live analysis timeline is driven by **polling** `GET /api/runs/{id}/events`, not SSE. | Vercel's Python runtime buffers responses (see §7). Polling works identically locally and deployed. |
 | D7 | **One `ENCRYPTION_KEY`** serves both Fernet (legacy) and AES-256-GCM (new `core/crypto.py`). | A Fernet key is url-safe-base64(32 bytes), which is exactly the 256-bit key AESGCM needs. One key, one failure mode. Losing it makes every stored credential permanently unrecoverable. |
 | D8 | `requirements.txt` is **exported from `uv.lock`**, never hand-maintained. | Vercel's `@vercel/python` builder reads `requirements.txt`. Lock-export guarantees local == deployed and prevents the drift that caused the missing `openai-agents` crash. |
+| D9 | **No system-wide credential fallback at all** (plan §54 Option A). Every user configures their own LLM, embedding, email, ERPNext, Google Places and Google Calendar credentials in Settings. | A shared key means one tenant's quota, rate limits and billing are spent by everyone, and a leak exposes all users at once. Removing the fallback also makes the isolation guarantee checkable: `core/config.py` holds no provider credential, so there is nothing to leak across users. |
+| D10 | Third-party integrations use **one generic `user_integration_config` table** driven by a provider registry (`core/integrations.py`), not one table per provider. | plan §41 names this table. Secrets for a provider live in a single AES-256-GCM JSON blob, non-secret fields in plain JSON so Settings can display them. Adding a provider is a change to the registry alone — no migration, no new endpoints, no frontend change. |
+| D11 | The chat orchestrator's four agents are built **per run from the caller's single model**; the old heavy/medium/light Gemini tiering is gone. | The tiering existed only because three global keys were available. A user configures one provider, so there is one model to route to. This closed the last rule §3.4 violation. |
 
 ---
 

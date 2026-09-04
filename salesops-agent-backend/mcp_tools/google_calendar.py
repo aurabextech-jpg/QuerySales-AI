@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _calendar_creds(creds: Any = None) -> tuple[str, str, str]:
-    """Return (client_id, client_secret, refresh_token) for this user."""
-    if creds is not None:
-        return (
-            creds.get("client_id"),
-            creds.get("client_secret"),
-            creds.get("refresh_token"),
-        )
+    """Return (client_id, client_secret, refresh_token) for this user.
+
+    No environment fallback — an unconfigured caller gets empty strings and
+    get_access_token raises a message pointing at Settings.
+    """
+    if creds is None:
+        return "", "", ""
     return (
-        settings.GOOGLE_CALENDAR_CLIENT_ID,
-        settings.GOOGLE_CALENDAR_CLIENT_SECRET,
-        settings.GOOGLE_CALENDAR_REFRESH_TOKEN,
+        creds.get("client_id"),
+        creds.get("client_secret"),
+        creds.get("refresh_token"),
     )
 
 

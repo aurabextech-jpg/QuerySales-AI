@@ -219,7 +219,8 @@ Only global env-var credentials. `core/security.py` has Fernet helpers used sole
    async def resolve_embedding_config(user_id, db) -> ResolvedEmbeddingConfig
    async def resolve_email_config(user_id, db) -> ResolvedEmailConfig | None
    ```
-   - Order: **user row → optional system fallback (env) → raise `ConfigurationMissing`.**
+   - Order: **user row → raise `ConfigurationMissing`.** No env fallback: every
+     user brings their own credentials (plan §54 Option A).
    - Never read another user's row. The `user_id` argument comes only from `get_current_user`.
    - Return decrypted values in a dataclass that never crosses a response boundary.
    - `ConfigurationMissing` maps to a 400 with an actionable message

@@ -1,21 +1,24 @@
 import json
 import httpx
 from typing import Dict, Any, List, Optional
-from core.config import settings
 from pydantic import BaseModel
 
 
 # ── Per-user credentials ────────────────────────────────────────────────────
-# Every function takes an optional ``creds`` (core.user_config.ResolvedIntegration).
-# When omitted it falls back to the global env settings, so existing call sites
-# and the system-level fallback both keep working.
+# Every function takes a ``creds`` (core.user_config.ResolvedIntegration) holding
+# the caller's own ERPNext credentials. Without it the tool returns a
+# "not configured" result — there is no shared instance to fall back to.
 
 
 def _erp_creds(creds: Any = None) -> tuple[str, str]:
-    """Return (base_url, api_token) from per-user creds or the env fallback."""
-    if creds is not None:
-        return creds.get("base_url"), creds.get("api_token")
-    return settings.ERPNEXT_BASE_URL, settings.ERPNEXT_API_TOKEN
+    """Return (base_url, api_token) from the caller's own configuration.
+
+    There is no environment fallback — a caller without credentials gets
+    ("", ""), and every tool turns that into a "not configured" result.
+    """
+    if creds is None:
+        return "", ""
+    return creds.get("base_url"), creds.get("api_token")
 
 
 def _erp_headers(token: str, *, json_body: bool = False) -> Dict[str, str]:
