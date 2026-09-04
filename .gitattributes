@@ -1,0 +1,31 @@
+# Normalise line endings so the repo behaves the same on Windows (dev) and the
+# Linux build agents Vercel uses. Without this, git's autocrlf rewrites files on
+# every checkout and shell scripts can pick up a CRLF that breaks them.
+* text=auto eol=lf
+
+# Shell scripts must never carry CRLF — gradlew is executed by Android tooling.
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Windows scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets — never touched by line-ending normalisation.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.jar binary
+*.keystore binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+
+# uv.lock is machine-generated and diffed, not read.
+uv.lock text eol=lf -diff

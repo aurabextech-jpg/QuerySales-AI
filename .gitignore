@@ -1,0 +1,34 @@
+# ── Secrets ──────────────────────────────────────────────────────────────
+# Never commit real credentials. .env.example carries placeholders only.
+.env
+.env.local
+.env.*.local
+salesopsapp/android/app/google-services.json
+
+# ── Python ───────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Node / Next.js ───────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+.next-swc/
+
+# ── OS / editor ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Local scratch ────────────────────────────────────────────────────────
+commands.md
+config.bat
+salesopsapp

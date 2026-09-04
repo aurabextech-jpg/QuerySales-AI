@@ -1,0 +1,52 @@
+[project]
+name = "salesops-agent-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+# Only DIRECT dependencies are declared here. uv resolves the full transitive tree
+# into uv.lock, and requirements.txt is exported from that lock (see README) so the
+# Vercel lambda installs exactly what was tested locally.
+#
+# Deliberately absent: firebase-admin, google-cloud-firestore, google-cloud-storage,
+# grpcio, protobuf, mcp, sse-starlette, tqdm, pywin32 — none are imported anywhere in
+# this backend and they consumed most of the 50 MB lambda budget.
+dependencies = [
+    # ── Web layer ────────────────────────────────────────────────────────
+    "fastapi>=0.136.1",
+    "uvicorn>=0.47.0",
+    "python-multipart>=0.0.28",   # multipart uploads for /api/knowledge/upload
+    # ── Data layer ───────────────────────────────────────────────────────
+    "sqlalchemy>=2.0.49",
+    "asyncpg>=0.31.0",             # async runtime driver (Neon)
+    "psycopg2-binary>=2.9.10",     # sync driver — alembic/env.py swaps asyncpg for it
+    "alembic>=1.18.4",
+    "pgvector>=0.4.2",             # Vector(1536) column type + <=> operator
+    # ── Agent / LLM ──────────────────────────────────────────────────────
+    "openai-agents>=0.17.2",
+    "openai>=2.36.0",
+    # ── Config, validation, HTTP ─────────────────────────────────────────
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "python-dotenv>=1.2.2",
+    "httpx>=0.28.1",
+    # ── Security ─────────────────────────────────────────────────────────
+    "cryptography>=48.0.0",        # Fernet (legacy) + AES-256-GCM (core/crypto.py)
+    "pyjwt>=2.12.1",               # Neon Auth EdDSA JWT verification
+    # ── Document extraction ──────────────────────────────────────────────
+    "pypdf>=6.13.2",
+    # ── Setup scripts only (not imported by main.py) ─────────────────────
+    "google-auth-oauthlib>=1.2.0", # scripts/get_google_token.py
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.uv]
+# uv does not try to build/install this project as a distribution — there is no
+# [build-system] and Vercel imports main.py directly.
+package = false
+
