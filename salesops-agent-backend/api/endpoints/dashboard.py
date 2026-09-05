@@ -1,30 +1,24 @@
-"""Dashboard endpoint — real-time stats from ERPNext + local DB metrics.
+"""Dashboard endpoint — the KPI tiles and pipeline breakdown.
 
 GET /api/dashboard/stats
 
-Returns:
-  - CRM pipeline breakdown (from ERPNext Lead API)
-  - Agent usage metrics (from local workflow_runs / audit_traces)
-  - Recent activity (from local chat_messages + tool_call_logs)
+Every figure comes from this app's own user-scoped tables. ERPNext is not
+consulted here: leads live in our Postgres (Decision D5), so an optional
+integration must never sit in the critical path of the landing page.
 """
 
 import logging
-from datetime import datetime, timedelta
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
 from core.security import get_current_user
 from db.models import (
     User,
     WorkflowRun,
-    AuditTrace,
     ToolCallLog,
-    ChatMessageLog,
     Lead,
     KnowledgeDocument,
     OutreachDraft,
@@ -39,329 +33,64 @@ router = APIRouter()
 
 # ── Response models ──────────────────────────────────────────────────────
 
-class PipelineStats(BaseModel):
-    """Lead pipeline breakdown from local DB."""
-    total_leads: int = 0
-    new: int = 0
-    analyzing: int = 0
-    qualified: int = 0
-    nurture: int = 0
-    disqualified: int = 0
-    contacted: int = 0
-    # Legacy ERPNext fields (optional extra)
-    erpnext_open: int = 0
-    erpnext_replied: int = 0
-    erpnext_opportunity: int = 0
-    erpnext_converted: int = 0
+class DashboardStatsResponse(BaseModel):
+    """The five KPI tiles plus the status breakdown behind them.
 
-
-class AgentUsageStats(BaseModel):
-    """Usage metrics from local DB."""
-    total_runs: int = 0
-    completed_runs: int = 0
-    failed_runs: int = 0
-    total_messages: int = 0
-    total_tool_calls: int = 0
-    total_tokens_used: int = 0
-    total_cost_usd: float = 0.0
-
-
-class RecentActivity(BaseModel):
-    """Recent item for the activity feed."""
-    type: str  # "message" | "tool_call" | "run"
-    description: str
-    timestamp: str
-
-
-class DashboardResponse(BaseModel):
-    pipeline: PipelineStats
-    usage: AgentUsageStats
-    recent_activity: list[RecentActivity]
-    knowledge_documents: int = 0
-    outreach_drafts: int = 0
-    categorized_leads: dict = {}
-    raw_leads: list = []
-
-
-# ── ERPNext helpers ──────────────────────────────────────────────────────
-
-async def _fetch_erpnext_pipeline(creds=None) -> PipelineStats:
-    """Fetch lead status counts from the caller's own ERPNext instance.
-
-    ERPNext is optional and must never block the dashboard (Decision D5):
-    an unconfigured or unreachable instance yields empty stats.
+    Mirrors ``DashboardStats`` in querysales-web/lib/types.ts — the dashboard
+    reads these keys directly, so renaming one blanks a tile.
     """
-    base_url = creds.get("base_url") if creds else ""
-    token = creds.get("api_token") if creds else ""
 
-    if not base_url or not token:
-        return PipelineStats()
-
-    headers = {"Authorization": f"token {token}"}
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Fetch all leads with status field
-            response = await client.get(
-                f"{base_url}/api/resource/Lead",
-                params={
-                    "fields": '["name","status"]',
-                    "limit_page_length": 0,  # 0 = all records
-                },
-                headers=headers,
-            )
-            response.raise_for_status()
-            leads = response.json().get("data", [])
-
-        # Count by status
-        status_map: dict[str, int] = {}
-        for lead in leads:
-            status = lead.get("status", "Open")
-            status_map[status] = status_map.get(status, 0) + 1
-
-        return PipelineStats(
-            total_leads=len(leads),
-            open=status_map.get("Open", 0),
-            replied=status_map.get("Replied", 0),
-            opportunity=status_map.get("Opportunity", 0),
-            converted=status_map.get("Converted", 0),
-            do_not_contact=status_map.get("Do Not Contact", 0),
-        )
-
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "ERPNext API error %d: %s",
-            exc.response.status_code,
-            exc.response.text[:200],
-        )
-        return PipelineStats()
-    except Exception as exc:
-        logger.error("ERPNext pipeline fetch failed: %s", exc)
-        return PipelineStats()
-
-async def _fetch_recent_leads(creds=None) -> tuple[dict, list]:
-    """Fetch recent leads from the caller's ERPNext and categorize them."""
-    try:
-        input_data = AnalyzeCrmInput(
-            doctype="Lead",
-            fields=["name", "lead_name", "status", "source", "creation", "email_id", "mobile_no"],
-            limit=3,
-            order_by="creation desc"
-        )
-        response = await analyze_crm_data(input_data, creds)
-        if response.get("status") == "error":
-            return {}, []
-            
-        records = response.get("data", [])
-        
-        categorized = {
-            "Open": [],
-            "Replied": [],
-            "Opportunity": [],
-            "Converted": [],
-            "Do Not Contact": []
-        }
-        
-        for record in records:
-            status = record.get("status", "Open")
-            if status in categorized:
-                categorized[status].append(record)
-            else:
-                categorized["Open"].append(record)
-                
-        return categorized, records
-    except Exception as exc:
-        logger.error("ERPNext recent leads fetch failed: %s", exc)
-        return {}, []
-
-
-# ── Local pipeline stats ─────────────────────────────────────────────
-
-
-async def _fetch_local_pipeline(user_id: str, db: AsyncSession) -> PipelineStats:
-    """Compute lead pipeline from local user-scoped data."""
-    result = await db.execute(
-        select(Lead.status, func.count(Lead.id))
-        .where(Lead.user_id == user_id)
-        .group_by(Lead.status)
-    )
-    status_counts = {row[0]: row[1] for row in result.fetchall()}
-    total = sum(status_counts.values())
-
-    # ERPNext is optional — try with this user's own credentials, never block
-    erpnext = PipelineStats()
-    try:
-        erp_creds = await resolve_integration_config(user_id, "erpnext", db)
-        erpnext = await _fetch_erpnext_pipeline(erp_creds)
-    except Exception:
-        pass
-
-    return PipelineStats(
-        total_leads=total,
-        new=status_counts.get("New", 0),
-        analyzing=status_counts.get("Analyzing", 0),
-        qualified=status_counts.get("Qualified", 0),
-        nurture=status_counts.get("Nurture", 0),
-        disqualified=status_counts.get("Disqualified", 0),
-        contacted=status_counts.get("Contacted", 0),
-        erpnext_open=erpnext.erpnext_open,
-        erpnext_replied=erpnext.erpnext_replied,
-        erpnext_opportunity=erpnext.erpnext_opportunity,
-        erpnext_converted=erpnext.erpnext_converted,
-    )
-
-
-# ── Local DB helpers ─────────────────────────────────────────────────────
-
-async def _fetch_usage_stats(
-    user_id: str,
-    db: AsyncSession,
-) -> AgentUsageStats:
-    """Aggregate agent usage metrics from local DB."""
-
-    # Total runs + status breakdown
-    runs_result = await db.execute(
-        select(
-            func.count(WorkflowRun.id),
-            func.count(WorkflowRun.id).filter(WorkflowRun.status == "completed"),
-            func.count(WorkflowRun.id).filter(WorkflowRun.status == "failed"),
-        ).where(WorkflowRun.user_id == user_id)
-    )
-    row = runs_result.one()
-    total_runs, completed, failed = row[0], row[1], row[2]
-
-    # Total messages
-    msg_result = await db.execute(
-        select(func.count(ChatMessageLog.id))
-        .join(WorkflowRun, ChatMessageLog.run_id == WorkflowRun.id)
-        .where(WorkflowRun.user_id == user_id)
-    )
-    total_messages = msg_result.scalar() or 0
-
-    # Total tool calls
-    tool_result = await db.execute(
-        select(func.count(ToolCallLog.id))
-        .join(WorkflowRun, ToolCallLog.run_id == WorkflowRun.id)
-        .where(WorkflowRun.user_id == user_id)
-    )
-    total_tool_calls = tool_result.scalar() or 0
-
-    # Total tokens + cost from audit traces
-    token_result = await db.execute(
-        select(
-            func.coalesce(func.sum(AuditTrace.input_tokens), 0),
-            func.coalesce(func.sum(AuditTrace.output_tokens), 0),
-            func.coalesce(func.sum(AuditTrace.cost_usd), 0.0),
-        )
-        .join(WorkflowRun, AuditTrace.run_id == WorkflowRun.id)
-        .where(WorkflowRun.user_id == user_id)
-    )
-    tok_row = token_result.one()
-    total_input = tok_row[0] or 0
-    total_output = tok_row[1] or 0
-    total_cost = float(tok_row[2] or 0.0)
-
-    return AgentUsageStats(
-        total_runs=total_runs,
-        completed_runs=completed,
-        failed_runs=failed,
-        total_messages=total_messages,
-        total_tool_calls=total_tool_calls,
-        total_tokens_used=total_input + total_output,
-        total_cost_usd=round(total_cost, 6),
-    )
-
-
-async def _fetch_recent_activity(
-    user_id: str,
-    db: AsyncSession,
-    limit: int = 3,
-) -> list[RecentActivity]:
-    """Fetch the most recent activity items for the user."""
-    items: list[RecentActivity] = []
-
-    # Recent messages
-    msg_result = await db.execute(
-        select(ChatMessageLog)
-        .join(WorkflowRun, ChatMessageLog.run_id == WorkflowRun.id)
-        .where(WorkflowRun.user_id == user_id)
-        .order_by(ChatMessageLog.created_at.desc())
-        .limit(limit)
-    )
-    for msg in msg_result.scalars().all():
-        preview = msg.content[:80] + "…" if len(msg.content) > 80 else msg.content
-        items.append(RecentActivity(
-            type="message",
-            description=f"{'You' if msg.role == 'user' else 'Agent'}: {preview}",
-            timestamp=msg.created_at.isoformat() if msg.created_at else "",
-        ))
-
-    # Recent tool calls
-    tool_result = await db.execute(
-        select(ToolCallLog)
-        .join(WorkflowRun, ToolCallLog.run_id == WorkflowRun.id)
-        .where(WorkflowRun.user_id == user_id)
-        .order_by(ToolCallLog.created_at.desc())
-        .limit(limit)
-    )
-    for tool in tool_result.scalars().all():
-        status = "✗" if tool.error else "✓"
-        items.append(RecentActivity(
-            type="tool_call",
-            description=f"{status} {tool.tool_name}",
-            timestamp=tool.created_at.isoformat() if tool.created_at else "",
-        ))
-
-    # Sort combined and take the latest N
-    items.sort(key=lambda x: x.timestamp, reverse=True)
-    return items[:limit]
+    total_leads: int = 0
+    qualified_leads: int = 0
+    outreach_sent: int = 0
+    active_runs: int = 0
+    knowledge_documents: int = 0
+    # Lead status → count, e.g. {"New": 3, "Qualified": 2}
+    pipeline: dict[str, int] = Field(default_factory=dict)
 
 
 # ── Endpoint ─────────────────────────────────────────────────────────────
 
-@router.get("/stats", response_model=DashboardResponse)
+@router.get("/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return full dashboard data: ERP pipeline + local usage + recent activity."""
+    """KPI tiles for the authenticated user, all from user-scoped local tables."""
     try:
-        pipeline = await _fetch_local_pipeline(current_user.id, db)
-        usage = await _fetch_usage_stats(current_user.id, db)
-        activity = await _fetch_recent_activity(current_user.id, db)
+        pipeline_result = await db.execute(
+            select(Lead.status, func.count(Lead.id))
+            .where(Lead.user_id == current_user.id)
+            .group_by(Lead.status)
+        )
+        pipeline = {status: count for status, count in pipeline_result.all()}
 
-        # Knowledge document count
-        kd_result = await db.execute(
+        sent_result = await db.execute(
+            select(func.count(OutreachDraft.id)).where(
+                OutreachDraft.user_id == current_user.id,
+                OutreachDraft.status == "sent",
+            )
+        )
+
+        active_result = await db.execute(
+            select(func.count(WorkflowRun.id)).where(
+                WorkflowRun.user_id == current_user.id,
+                WorkflowRun.status == "running",
+            )
+        )
+
+        docs_result = await db.execute(
             select(func.count(KnowledgeDocument.id))
             .where(KnowledgeDocument.user_id == current_user.id)
         )
-        knowledge_count = kd_result.scalar() or 0
 
-        # Outreach drafts count
-        od_result = await db.execute(
-            select(func.count(OutreachDraft.id))
-            .where(OutreachDraft.user_id == current_user.id)
-        )
-        outreach_count = od_result.scalar() or 0
-
-        # ERPNext leads are optional
-        categorized_leads, raw_leads = {}, []
-        try:
-            erp_creds = await resolve_integration_config(
-                current_user.id, "erpnext", db
-            )
-            categorized_leads, raw_leads = await _fetch_recent_leads(erp_creds)
-        except Exception:
-            pass
-
-        return DashboardResponse(
+        return DashboardStatsResponse(
+            total_leads=sum(pipeline.values()),
+            qualified_leads=pipeline.get("Qualified", 0),
+            outreach_sent=sent_result.scalar() or 0,
+            active_runs=active_result.scalar() or 0,
+            knowledge_documents=docs_result.scalar() or 0,
             pipeline=pipeline,
-            usage=usage,
-            recent_activity=activity,
-            knowledge_documents=knowledge_count,
-            outreach_drafts=outreach_count,
-            categorized_leads=categorized_leads,
-            raw_leads=raw_leads,
         )
     except Exception as exc:
         logger.error(
@@ -372,6 +101,7 @@ async def get_dashboard_stats(
             status_code=500,
             detail="Failed to retrieve dashboard stats.",
         )
+
 
 
 @router.get("/leads")
