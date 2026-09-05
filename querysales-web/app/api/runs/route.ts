@@ -6,9 +6,13 @@ import { NextResponse } from "next/server";
 import { apiGet } from "@/lib/api-client";
 import type { RunSummary } from "@/lib/types";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const runs = await apiGet<RunSummary[]>("/api/runs");
+    const workflowType = new URL(request.url).searchParams.get("workflow_type");
+    const runs = await apiGet<RunSummary[]>(
+      "/api/runs",
+      workflowType ? { workflow_type: workflowType } : undefined,
+    );
     return NextResponse.json(runs);
   } catch (err) {
     console.error("[api/runs]", err);

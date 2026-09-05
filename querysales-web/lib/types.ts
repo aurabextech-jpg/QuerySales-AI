@@ -93,6 +93,8 @@ export interface RunSummary {
   qualification: string | null;
   created_at: string;
   completed_at: string | null;
+  /** Chat sessions only: first user message, truncated. */
+  title: string | null;
 }
 
 /* ── Knowledge ─────────────────────────────────────────────────────── */

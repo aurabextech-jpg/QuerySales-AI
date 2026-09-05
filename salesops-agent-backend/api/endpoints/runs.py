@@ -9,7 +9,15 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import get_current_user
-from db.models import User, WorkflowRun, ToolCallLog, AuditTrace, AgentEvent, Lead
+from db.models import (
+    User,
+    WorkflowRun,
+    ToolCallLog,
+    AuditTrace,
+    AgentEvent,
+    Lead,
+    ChatMessageLog,
+)
 from db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -52,6 +60,8 @@ class WorkflowRunSummary(BaseModel):
     score: int | None = None
     qualification: str | None = None
     completed_at: datetime | None = None
+    # Chat sessions only: first user message, truncated, for a session list label.
+    title: str | None = None
 
 
 # ── POST /api/runs — create a new run ────────────────────────────────────
@@ -90,17 +100,18 @@ async def create_run(
 async def list_runs(
     limit: int = 20,
     offset: int = 0,
+    workflow_type: str | None = Query(None, description="Filter by workflow_type, e.g. 'chat'"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """List workflow runs for the authenticated user, newest first."""
     try:
+        query = select(WorkflowRun).where(WorkflowRun.user_id == current_user.id)
+        if workflow_type:
+            query = query.where(WorkflowRun.workflow_type == workflow_type)
+
         result = await db.execute(
-            select(WorkflowRun)
-            .where(WorkflowRun.user_id == current_user.id)
-            .order_by(WorkflowRun.created_at.desc())
-            .offset(offset)
-            .limit(limit)
+            query.order_by(WorkflowRun.created_at.desc()).offset(offset).limit(limit)
         )
         runs = result.scalars().all()
 
@@ -135,6 +146,7 @@ async def list_runs(
                 score=(run.final_result or {}).get("lead_score"),
                 qualification=(run.final_result or {}).get("qualification"),
                 completed_at=run.completed_at,
+                title=None,  # populated below for chat sessions
             ))
 
         # Populate lead company for runs that have a lead_id
@@ -147,6 +159,27 @@ async def list_runs(
             for s in summaries:
                 if s.lead_id:
                     s.lead_company = lead_map.get(s.lead_id)
+
+        # Populate a display title for chat sessions from their first user
+        # message — the run itself carries no subject line.
+        chat_run_ids = [s.id for s in summaries if s.workflow_type == "chat"]
+        if chat_run_ids:
+            msg_result = await db.execute(
+                select(ChatMessageLog)
+                .where(
+                    ChatMessageLog.run_id.in_(chat_run_ids),
+                    ChatMessageLog.role == "user",
+                )
+                .order_by(ChatMessageLog.created_at.asc())
+            )
+            first_message_by_run: dict[str, str] = {}
+            for msg in msg_result.scalars().all():
+                first_message_by_run.setdefault(msg.run_id, msg.content)
+            for s in summaries:
+                if s.workflow_type == "chat":
+                    text = first_message_by_run.get(s.id)
+                    if text:
+                        s.title = text if len(text) <= 60 else text[:57] + "…"
 
         return summaries
     except HTTPException:
