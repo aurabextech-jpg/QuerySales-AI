@@ -421,6 +421,22 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   `mcp_tools/google_dork.py` wraps the Google Custom Search JSON API, which needs **two** values
   (`api_key` + `cx`) and caps `num` at 10 per request — asking for more is a 400.
 
+- **2026-09-06 — The dashboard KPI tiles were blank because of a silent contract mismatch.**
+  `GET /api/dashboard/stats` returned `{pipeline: {...}, usage: {...}, recent_activity: [...],
+  knowledge_documents, outreach_drafts, categorized_leads, raw_leads}` while the page reads the
+  flat `DashboardStats` shape in `querysales-web/lib/types.ts`
+  (`total_leads · qualified_leads · outreach_sent · active_runs · knowledge_documents · pipeline`).
+  Only `knowledge_documents` overlapped, so four of five tiles rendered `undefined` — and because
+  `stats` was a *truthy object*, the page showed neither its skeleton nor its error banner. **A
+  blank tile means a key was renamed on one side.** The endpoint now returns exactly that contract
+  and says so in its docstring. Removed with it: `_fetch_erpnext_pipeline` (which built
+  `PipelineStats(open=…, replied=…)` — field names that do not exist on the model, so Pydantic
+  silently dropped them and its counts were always 0), `_fetch_recent_leads`, `_fetch_usage_stats`
+  and `_fetch_recent_activity` — ~240 lines nothing rendered, two of which hit ERPNext over HTTP on
+  every dashboard load. `GET /api/dashboard/leads` and `/{run_id}/outcome` were left untouched.
+  Note `outreach_sent` counts `OutreachDraft.status == "sent"` and `active_runs` counts
+  `WorkflowRun.status == "running"`, so both legitimately read 0 on a fresh demo.
+
 ---
 
 ## 8. Decision Log
