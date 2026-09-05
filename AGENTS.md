@@ -389,6 +389,38 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   generation progress. The client `mailFetch` 401 handler does a hard `window.location.href="/login"`
   (intentional full state reset; benign Next lint warning — it is module-level, so no router hook).
 
+- **2026-09-05 — Agent tool corrections + two new discovery tools.** Three latent bugs were
+  fixed in the chat orchestrator's tool layer, all of which made the agent *believe* something
+  untrue: (1) every ERPNext and Places wrapper advertised a `simulation_mode` parameter to the
+  LLM that **no code path ever read** — the Pydantic input models silently dropped it, so every
+  call was always live; the parameter is gone. (2) `search_leads_multi` never forwarded `creds`
+  to its own fan-out `search_businesses` calls, so the *primary* Places discovery tool returned
+  zero results for every user regardless of configuration, and reported that as
+  `status: "success"` — it now forwards credentials and returns the underlying `reason` when
+  every sub-query fails. (3) `get_chatbot_link` targeted
+  `/api/method/education.education.chatbot_api.…`, a custom Frappe *education app* RPC that
+  404s on any stock ERPNext CRM; it was removed from the tool list, the prompt, and
+  `mcp_tools/erpnext.py`. Note `create_erpnext_lead` still sends `docstatus=1` (submitted, i.e.
+  final) — that is now stated in the tool docstring and the CRM agent's prompt rather than
+  being a silent surprise.
+
+- **2026-09-05 — The "NEVER use markdown tables" prompt rule was inverted.** It existed because
+  the old React Native chat could not render them. The web `/agent` view renders GFM markdown
+  (`react-markdown` + `remark-gfm`), so all four agent prompts now *prefer* a table for 4+
+  uniform rows. If a future surface cannot render markdown, change the prompts — do not
+  re-add a blanket ban.
+
+- **2026-09-05 — `lead_sources` and `google_dork_search` providers added (Decision D13).**
+  Neither needed a migration: `user_integration_config.provider` is a free string and the field
+  set comes from `core/integrations.py`. `lead_sources` stores its URL list as **one
+  newline-delimited string** in a single field flagged `multiline=True` — a new render hint that
+  flows registry → `IntegrationFieldSchema` → TS `IntegrationField` → a `<Textarea>` in
+  `integration-card.tsx`; every layer keeps its `dict[str, str]` typing. `mcp_tools/lead_sources.py`
+  fetches only the exact pages the user listed (max 10, never follows links) and strips HTML with
+  regex, **not** a parser — the lambda has a 50 MB budget and no HTML library, deliberately.
+  `mcp_tools/google_dork.py` wraps the Google Custom Search JSON API, which needs **two** values
+  (`api_key` + `cx`) and caps `num` at 10 per request — asking for more is a 400.
+
 ---
 
 ## 8. Decision Log
@@ -409,6 +441,7 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
 | D10 | Third-party integrations use **one generic `user_integration_config` table** driven by a provider registry (`core/integrations.py`), not one table per provider. | plan §41 names this table. Secrets for a provider live in a single AES-256-GCM JSON blob, non-secret fields in plain JSON so Settings can display them. Adding a provider is a change to the registry alone — no migration, no new endpoints, no frontend change. |
 | D11 | The chat orchestrator's four agents are built **per run from the caller's single model**; the old heavy/medium/light Gemini tiering is gone. | The tiering existed only because three global keys were available. A user configures one provider, so there is one model to route to. This closed the last rule §3.4 violation. |
 | D12 | **Mail reads via IMAP and sends via SMTP, but the workspace lives in our Postgres** (`mail_messages` / `mail_drafts`), user-scoped. The IMAP host is **derived from the SMTP host** (no separate IMAP credential); inbox sync is **read-only** against the provider; agent replies become editable **drafts** that never send without an explicit approval endpoint. | One email config in Settings (the user already enters SMTP) instead of two, matching every major provider's `smtp.`→`imap.` convention. Local storage gives per-user isolation (rule §3.2) and Gmail-style folders without depending on the provider's folder semantics. Read-only sync + draft-then-approve keeps a human in the loop — the agent can never silently send or alter mail. |
+| D13 | Two new lead-discovery tools ship as **registry providers with no migration**: `lead_sources` (a user-curated list of public page URLs, stored as one newline-delimited string in a `multiline` field) and `google_dork_search` (Google Custom Search JSON API, key + `cx`). Both attach to `lead_gen_agent` only. | plan §41's generic `user_integration_config` already stores arbitrary providers (D10), so a list value as one newline-delimited string keeps every layer's `dict[str, str]` typing and needs zero schema change — only a `multiline` render hint. Keeping them off `sales_agent.py` matches D5: the autonomous per-lead analyst works the internal Postgres lead, discovery is a chat-agent concern. |
 
 ---
 

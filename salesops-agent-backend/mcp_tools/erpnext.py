@@ -122,29 +122,6 @@ class AnalyzeCrmInput(BaseModel):
     order_by: str = "creation desc"
 
 
-async def get_chatbot_link(lead_id: str, creds: Any = None) -> Dict[str, Any]:
-    """Fetches the chatbot link/quotation link for a given Lead ID."""
-    base_url, token = _erp_creds(creds)
-    if not base_url or not token:
-        return _erp_unconfigured()
-    headers = _erp_headers(token)
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                f"{base_url}/api/method/education.education.chatbot_api.get_chatbot_link",
-                params={"lead_id": lead_id},
-                headers=headers,
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            return {"status": "success", "data": response.json().get("message", {})}
-        except httpx.HTTPStatusError as e:
-            return {"status": "error", "message": f"HTTP error occurred: {e}", "details": e.response.text}
-        except Exception as e:
-            return {"status": "error", "message": f"An error occurred: {str(e)}"}
-
-
 async def read_erpnext_lead(
     input_data: ReadLeadInput, creds: Any = None
 ) -> Dict[str, Any]:

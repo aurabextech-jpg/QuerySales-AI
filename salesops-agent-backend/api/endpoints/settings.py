@@ -532,6 +532,7 @@ class IntegrationFieldSchema(BaseModel):
     required: bool
     placeholder: str = ""
     help: str = ""
+    multiline: bool = False
 
 
 class IntegrationResponse(BaseModel):
@@ -594,6 +595,7 @@ def _integration_payload(
                 required=f.required,
                 placeholder=f.placeholder,
                 help=f.help,
+                multiline=f.multiline,
             )
             for f in spec.fields
         ],
@@ -760,6 +762,14 @@ async def test_integration(
             from mcp_tools.google_calendar import ping_calendar
 
             return TestResult(**await ping_calendar(resolved))
+        if provider == "lead_sources":
+            from mcp_tools.lead_sources import ping_lead_sources
+
+            return TestResult(**await ping_lead_sources(resolved))
+        if provider == "google_dork_search":
+            from mcp_tools.google_dork import ping_dork_search
+
+            return TestResult(**await ping_dork_search(resolved))
     except Exception as exc:
         # Provider errors can embed hostnames and tokens — log server-side and
         # return only the exception type (plan §31, §56).

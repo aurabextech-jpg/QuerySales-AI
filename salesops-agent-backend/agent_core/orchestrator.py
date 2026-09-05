@@ -51,8 +51,8 @@ class AgentContext:
     """Per-run context threaded to every tool via RunContextWrapper.
 
     The integration fields carry the authenticated user's own credentials
-    (core.user_config.ResolvedIntegration). When one is None the tool falls
-    back to the optional system-level env vars.
+    (core.user_config.ResolvedIntegration). There is no shared fallback
+    (rule §3.4) — a None field makes its tool report "not configured".
     """
 
     run_id: str
@@ -60,13 +60,15 @@ class AgentContext:
     erpnext: object | None = None
     google_places: object | None = None
     google_calendar: object | None = None
+    lead_sources: object | None = None
+    google_dork_search: object | None = None
 
 
 # ── Tool wrappers ────────────────────────────────────────────────────────
 
 from mcp_tools.erpnext import (
     create_erpnext_lead, read_erpnext_lead, update_erpnext_lead,
-    analyze_crm_data, get_chatbot_link,
+    analyze_crm_data,
     CreateLeadInput, ReadLeadInput, UpdateLeadInput, AnalyzeCrmInput,
 )
 from mcp_tools.gmail import send_email
@@ -78,6 +80,8 @@ from mcp_tools.google_calendar import (
     check_availability, create_event,
     CheckAvailabilityInput, CreateEventInput,
 )
+from mcp_tools.lead_sources import search_source_sites, SearchSourceSitesInput
+from mcp_tools.google_dork import dork_search, DorkSearchInput
 
 
 async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -> dict:
@@ -92,6 +96,8 @@ async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -
         erp = context.erpnext if context else None
         places = context.google_places if context else None
         calendar = context.google_calendar if context else None
+        sources = context.lead_sources if context else None
+        dork = context.google_dork_search if context else None
 
         match tool_name:
             case "create_erpnext_lead":
@@ -102,8 +108,10 @@ async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -
                 return await update_erpnext_lead(UpdateLeadInput(**arguments), erp)
             case "analyze_crm_data":
                 return await analyze_crm_data(AnalyzeCrmInput(**arguments), erp)
-            case "get_chatbot_link":
-                return await get_chatbot_link(arguments["lead_id"], erp)
+            case "search_source_sites":
+                return await search_source_sites(SearchSourceSitesInput(**arguments), sources)
+            case "dork_search":
+                return await dork_search(DorkSearchInput(**arguments), dork)
             case "send_email":
                 return await send_email(
                     arguments["to_email"], arguments["subject"],
@@ -132,24 +140,41 @@ async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -
 async def create_erpnext_lead_tool(
     wrapper: RunContextWrapper[AgentContext],
     first_name: str, mobile_no: str, email_id: str,
-    simulation_mode: bool = True,
 ) -> dict:
-    """Creates a lead in ERPNext CRM with optional quotation line items."""
+    """Create a lead in the user's ERPNext CRM. This writes a REAL record.
+
+    The lead is created submitted (ERPNext docstatus 1), so treat it as final —
+    confirm the details with the user before calling this.
+
+    Args:
+        first_name: Contact or company name for the ERPNext Lead.
+        mobile_no: Phone number. Pass "" when unknown.
+        email_id: Email address. Pass "" when unknown.
+
+    Returns:
+        {"status": "success", "data": {...}} with the created record, or
+        {"status": "error", "reason": "not_configured"} when the user has no
+        ERPNext credentials — in that case tell them to add ERPNext in
+        Settings -> Integrations. Never claim the lead was created.
+    """
     return await _call("create_erpnext_lead", {
         "first_name": first_name, "mobile_no": mobile_no,
-        "email_id": email_id, "simulation_mode": simulation_mode,
+        "email_id": email_id,
     }, context=wrapper.context)
 
 
 @function_tool
 async def read_erpnext_lead_tool(
-    wrapper: RunContextWrapper[AgentContext],
-    lead_id: str, simulation_mode: bool = True,
+    wrapper: RunContextWrapper[AgentContext], lead_id: str,
 ) -> dict:
-    """Retrieves lead details from ERPNext CRM by Lead ID."""
-    return await _call("read_erpnext_lead", {
-        "lead_id": lead_id, "simulation_mode": simulation_mode,
-    }, context=wrapper.context)
+    """Read one ERPNext Lead by its ERPNext record name.
+
+    Args:
+        lead_id: The ERPNext Lead name, e.g. "CRM-LEAD-2026-00042" — not this
+                 app's own lead id and not the company name. Use
+                 analyze_crm_data_tool first when you only know the name.
+    """
+    return await _call("read_erpnext_lead", {"lead_id": lead_id}, context=wrapper.context)
 
 
 @function_tool
@@ -157,34 +182,47 @@ async def update_erpnext_lead_tool(
     wrapper: RunContextWrapper[AgentContext],
     lead_id: str, status: str = None, lead_name: str = None,
     notes: str = None, phone: str = None, email_id: str = None,
-    simulation_mode: bool = True,
 ) -> dict:
-    """Updates an existing lead in ERPNext CRM."""
+    """Update an existing ERPNext Lead. Only the fields you pass are changed.
+
+    Args:
+        lead_id: The ERPNext Lead name, e.g. "CRM-LEAD-2026-00042".
+        status: ERPNext lead status — one of Lead, Open, Replied, Opportunity,
+                Quotation, Lost Quotation, Interested, Converted, Do Not Contact.
+        lead_name: Display name of the lead.
+        notes: Free-text note to store on the record.
+        phone: Phone number.
+        email_id: Email address.
+    """
     return await _call("update_erpnext_lead", {
         "lead_id": lead_id, "status": status, "lead_name": lead_name,
         "notes": notes, "phone": phone, "email_id": email_id,
-        "simulation_mode": simulation_mode,
     }, context=wrapper.context)
 
 
 @function_tool
 async def analyze_crm_data_tool(
     wrapper: RunContextWrapper[AgentContext],
-    doctype: str = "Lead", limit: int = 20,
-    simulation_mode: bool = True,
+    doctype: str = "Lead", status: str = None, limit: int = 20,
 ) -> dict:
-    """Fetches and summarises CRM data from ERPNext."""
-    return await _call("analyze_crm_data", {
-        "doctype": doctype, "limit": limit, "simulation_mode": simulation_mode,
-    }, context=wrapper.context)
+    """List ERPNext records so you can analyse the pipeline yourself.
 
+    This returns RAW records, not aggregates: count and group them yourself,
+    and say how many records you actually looked at. If the count equals
+    `limit` there are probably more — raise the limit or filter by status
+    rather than presenting a truncated slice as the whole pipeline.
 
-@function_tool
-async def get_chatbot_link_tool(
-    wrapper: RunContextWrapper[AgentContext], lead_id: str,
-) -> dict:
-    """Fetches the quotation / chatbot link for a given Lead ID."""
-    return await _call("get_chatbot_link", {"lead_id": lead_id}, context=wrapper.context)
+    Args:
+        doctype: ERPNext doctype to list — "Lead" (default), "Opportunity",
+                 "Customer", "Contact".
+        status: Optional exact status filter, e.g. "Open". Call once per status
+                when you need a per-status breakdown.
+        limit: Max records to return, newest first (default 20).
+    """
+    arguments: dict = {"doctype": doctype, "limit": limit}
+    if status:
+        arguments["filters"] = {"status": status}
+    return await _call("analyze_crm_data", arguments, context=wrapper.context)
 
 
 @function_tool
@@ -211,12 +249,11 @@ async def send_email_tool(
 @function_tool
 async def search_businesses_tool(
     wrapper: RunContextWrapper[AgentContext],
-    query: str, max_results: int = 20, simulation_mode: bool = True,
+    query: str, max_results: int = 20,
 ) -> dict:
     """Search for businesses using Google Places."""
     return await _call("search_businesses", {
         "query": query, "max_results": max_results,
-        "simulation_mode": simulation_mode,
     }, context=wrapper.context)
 
 
@@ -224,24 +261,82 @@ async def search_businesses_tool(
 async def search_leads_multi_tool(
     wrapper: RunContextWrapper[AgentContext],
     industry: str, location: str,
-    max_results_per_query: int = 10, simulation_mode: bool = True,
+    max_results_per_query: int = 10,
 ) -> dict:
     """Primary lead discovery tool with parallel search + dedup."""
     return await _call("search_leads_multi", {
         "industry": industry, "location": location,
         "max_results_per_query": max_results_per_query,
-        "simulation_mode": simulation_mode,
     }, context=wrapper.context)
 
 
 @function_tool
 async def get_place_details_tool(
-    wrapper: RunContextWrapper[AgentContext],
-    place_id: str, simulation_mode: bool = True,
+    wrapper: RunContextWrapper[AgentContext], place_id: str,
 ) -> dict:
     """Fetch detailed information about a place by Google Place ID."""
     return await _call("get_place_details", {
-        "place_id": place_id, "simulation_mode": simulation_mode,
+        "place_id": place_id,
+    }, context=wrapper.context)
+
+
+@function_tool
+async def search_source_sites_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    query: str, max_results_per_site: int = 5,
+) -> dict:
+    """Search the source pages this user curated in Settings for leads.
+
+    These are the user's own trusted directories, member lists and exhibitor
+    lists — usually higher-signal than a general web search, and the right
+    first stop when they say "my sources", "our list", or name a directory.
+
+    Args:
+        query: What to look for, e.g. "textile exporters" or "procurement head".
+               Use 3+ character words; the tool matches them against page text.
+        max_results_per_site: Matching passages per page (default 5).
+
+    Returns:
+        {"status": "success", "results": [{source_url, matches, links, emails,
+        phones}], "unreachable": [...]}. Cite the source_url for every lead you
+        report. When "reason" is "not_configured", tell the user to add page
+        URLs in Settings -> Integrations -> Lead Source Sites.
+    """
+    return await _call("search_source_sites", {
+        "query": query, "max_results_per_site": max_results_per_site,
+    }, context=wrapper.context)
+
+
+@function_tool
+async def dork_search_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    query: str, max_results: int = 10,
+) -> dict:
+    """Search Google's public index with advanced operators to find leads.
+
+    Use it to find companies and decision-makers that a map search cannot see:
+    role titles, technologies, tender notices, membership pages.
+
+    Args:
+        query: A Google query. Combine operators for precision —
+               `site:` / `-site:` to target or exclude a domain,
+               `intitle:` / `inurl:` to match page titles and paths,
+               `filetype:` for documents, `OR` for alternatives, and
+               "quoted phrases" for exact matches.
+               Example: site:linkedin.com/in "head of procurement" "Lahore"
+               Example: intitle:"our members" textile association Pakistan
+               Start broad, then narrow — one operator at a time.
+        max_results: Results to return, max 10 per call (Google's limit).
+
+    Returns:
+        {"status": "success", "results": [{title, url, domain, snippet}]}.
+        These are search-result previews, NOT verified contact details: never
+        invent an email or phone number from a snippet, and cite the url for
+        every lead. When "reason" is "not_configured", tell the user to add a
+        Custom Search key in Settings -> Integrations.
+    """
+    return await _call("dork_search", {
+        "query": query, "max_results": max_results,
     }, context=wrapper.context)
 
 
@@ -307,12 +402,15 @@ SALES_AGENT_SYSTEM_PROMPT = """\
 Role: SalesOps Orchestrator — autonomous lead-gen specialist + ERPNext CRM operator.
 
 You manage specialized agents:
-- lead_generation: Discover and enrich leads from Google Places.
-- crm_management: Manage and analyze CRM data in ERPNext.
+- lead_generation: Discover and enrich leads from three sources — Google Places (local businesses),
+  the user's own curated source pages, and targeted Google operator ("dork") search of the public web.
+- crm_management: Manage and analyze records in the user's ERPNext CRM. ERPNext is an OPTIONAL
+  outbound integration, not this app's lead store, and it only works if that user configured it.
 - outreach: Draft emails, check REAL Google Calendar availability, and create REAL calendar events.
 
 # Strategy
-1. Delegate broad lead discovery requests to `lead_generation`.
+1. Delegate broad lead discovery requests to `lead_generation`. Pass along which source the user
+   asked for — their own sources, a map/local search, or the wider public web — when they said.
 2. Delegate CRM tasks (creating/reading/updating leads, pipeline analysis) to `crm_management`.
 3. Delegate ALL scheduling, meeting, availability, and email tasks to `outreach`. This agent has access to the user's real Google Calendar — it is NOT a simulation.
 4. When leads are discovered, proactively ask the user which ones they want to add to the CRM, then delegate to `crm_management`.
@@ -340,16 +438,19 @@ IF intent unclear OR missing params (industry, city, lead-ID):
 
 # Output Formatting Rules (CRITICAL)
 - Currency: PKR. Dates: DD-MMM-YYYY. Phone: +92-xxx.
-- **NEVER** use markdown tables (no | --- | syntax). Instead:
-  - Use **bold headings** for categories.
-  - Use bullet points (- or •) for listing items.
-  - Use indented sub-bullets for details under each item.
-- Example format for leads:
+- The interface renders full markdown — tables, **bold**, *italics*, lists, `code` and links all
+  display correctly. Choose the format that fits the data:
+  - **Markdown table** for 4+ items sharing the same fields (lead lists, pipeline breakdowns).
+  - **Bold-titled bullets** for 1-3 items, or when each item carries different detail.
+- Example table:
+  | Lead | Opportunity | Rating | Phone | Source |
+  | --- | --- | --- | --- | --- |
+  | Al-Shifa Clinic | High | 4.5 (230) | +92-42-35761234 | Google Places |
+- Example bullets:
   **Al-Shifa Clinic** (Opportunity: High)
   - Address: 45-A, Main Boulevard, Gulberg III, Lahore
   - Rating: 4.5 ⭐ (230 reviews)
   - Phone: +92-42-35761234
-  - Website: alshifaclinic.pk
 - Always end with a "**Next Best Action**" suggestion.
 - Keep responses focused, professional, and actionable.
 
@@ -385,22 +486,48 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model_settings=model_settings,
     instructions=(
         "You are a specialized Lead Generation Agent. Your job is to discover and enrich potential business leads.\n\n"
-        "## Search Strategy\n"
-        "1. Use `search_leads_multi_tool` for broad discovery based on industry and location.\n"
-        "2. Use `search_businesses_tool` for targeted single-query searches when the user is specific.\n"
-        "3. Enrich top prospects using `get_place_details_tool` to gather phone, website, and address.\n\n"
+        "## Choosing a source\n"
+        "You have three independent discovery sources. Pick by what the user is asking for,\n"
+        "and combine them when a request spans more than one.\n"
+        "1. `search_leads_multi_tool` / `search_businesses_tool` (Google Places) — local businesses\n"
+        "   by industry and city. Best for 'find X companies in Y'. Returns ratings, phone, website.\n"
+        "   Use `search_leads_multi_tool` for broad discovery, `search_businesses_tool` for one precise query.\n"
+        "2. `search_source_sites_tool` — the user's OWN curated directories and member lists.\n"
+        "   Try this FIRST whenever they say 'my sources', 'our list', or name a directory: these are\n"
+        "   pages they already trust, so hits are higher-signal than the open web.\n"
+        "3. `dork_search_tool` — the public web via Google operators. Use it for what a map search\n"
+        "   cannot answer: job titles and decision-makers, companies using a specific technology,\n"
+        "   tenders, association member pages, conference speaker lists.\n"
+        "   Build precise queries: site:linkedin.com/in \"head of procurement\" \"Lahore\" ·\n"
+        "   intitle:\"our members\" textile association · site:example.com \"case study\".\n"
+        "   Start with one operator, and re-run narrower if results are noisy.\n"
+        "4. Enrich top Places prospects with `get_place_details_tool` for phone, website, address.\n\n"
+        "## Source integrity (MANDATORY)\n"
+        "- Report ONLY what a tool returned. Never invent an email, phone number, or company from\n"
+        "  a search snippet — snippets are previews, not verified contact records.\n"
+        "- Cite the source for every lead: the source_url for curated pages, the result url for\n"
+        "  dork search, 'Google Places' for Places results.\n"
+        "- If a tool returns reason 'not_configured', say which integration is missing and point the\n"
+        "  user to Settings -> Integrations. Do NOT substitute another source silently, and do NOT\n"
+        "  answer from your own knowledge.\n"
+        "- If a source returns nothing, say so and suggest a broader query — never pad the list.\n\n"
         "## Opportunity Scoring\n"
         "Assign an opportunity score (High / Medium / Low) to each lead based on:\n"
         "- **High**: Rating ≥ 4.0, review count ≥ 100, has website and phone.\n"
         "- **Medium**: Rating ≥ 3.5 OR review count ≥ 50, has at least one contact method.\n"
-        "- **Low**: Everything else.\n\n"
+        "- **Low**: Everything else.\n"
+        "For leads without ratings (curated pages, dork search), score on contact completeness and\n"
+        "how directly the page evidences a fit with what the user sells.\n\n"
         "## Output Rules\n"
-        "- NEVER use markdown tables. Present each lead as a bold-titled bullet list.\n"
-        "- Format: **Lead Name** followed by indented details (address, rating, phone, website, opportunity score).\n"
+        "- A markdown table is the right format for 4+ leads sharing the same fields — the UI renders\n"
+        "  tables, bold and lists properly. Use a bold-titled bullet list for 1-3 leads or mixed detail.\n"
         "- Group leads by opportunity score: High first, then Medium, then Low.\n"
         "- Always suggest which leads the user should add to their CRM and offer to do it for them.\n"
     ),
-    tools=[search_leads_multi_tool, search_businesses_tool, get_place_details_tool],
+    tools=[
+        search_leads_multi_tool, search_businesses_tool, get_place_details_tool,
+        search_source_sites_tool, dork_search_tool,
+    ],
     )
 
     crm_agent = Agent[AgentContext](
@@ -408,23 +535,42 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model=model,
     model_settings=model_settings,
     instructions=(
-        "You are a specialized CRM Management Agent operating ERPNext.\n\n"
-        "## Core Capabilities\n"
-        "1. Create leads using `create_erpnext_lead_tool`.\n"
-        "2. Update existing leads with `update_erpnext_lead_tool`.\n"
-        "3. Read lead details with `read_erpnext_lead_tool`.\n"
-        "4. Analyze pipeline health and insights with `analyze_crm_data_tool`.\n"
-        "5. Generate chatbot links with `get_chatbot_link_tool`.\n\n"
+        "You are a specialized CRM Management Agent operating the user's own ERPNext instance.\n"
+        "Every tool below performs a REAL call against it. There is no simulation or dry-run mode:\n"
+        "if you call a write tool, the record changes.\n\n"
+        "## Your tools\n"
+        "1. `create_erpnext_lead_tool(first_name, mobile_no, email_id)` — creates a Lead.\n"
+        "   All three arguments are required; pass \"\" for any the user did not give you.\n"
+        "   The record is created SUBMITTED, so it is final — read the details back to the user\n"
+        "   and get their go-ahead before calling it, and never batch-create without asking.\n"
+        "2. `read_erpnext_lead_tool(lead_id)` — one lead by its ERPNext name, e.g.\n"
+        "   \"CRM-LEAD-2026-00042\". A company name is NOT a lead_id: when you only have a name,\n"
+        "   find the record with `analyze_crm_data_tool` first and use the `name` field it returns.\n"
+        "3. `update_erpnext_lead_tool(lead_id, status=, lead_name=, notes=, phone=, email_id=)` —\n"
+        "   only the arguments you pass are written. Valid ERPNext statuses: Lead, Open, Replied,\n"
+        "   Opportunity, Quotation, Lost Quotation, Interested, Converted, Do Not Contact.\n"
+        "4. `analyze_crm_data_tool(doctype=, status=, limit=)` — lists RAW records; it does not\n"
+        "   aggregate. Count and group them yourself. For a per-status breakdown, call it once per\n"
+        "   status. Always tell the user how many records you actually examined, and if the count\n"
+        "   came back equal to `limit` say the view may be truncated instead of implying it is the\n"
+        "   whole pipeline. `doctype` accepts Lead (default), Opportunity, Customer, Contact.\n\n"
+        "## ERPNext is optional and outbound only\n"
+        "- This app's own leads live in its database, not in ERPNext. ERPNext is where the user\n"
+        "  pushes records OUT to. Do not describe it as the source of truth for their pipeline.\n"
+        "- If a tool returns reason 'not_configured', ERPNext credentials are missing for this user.\n"
+        "  Say exactly that and point them to Settings -> Integrations. NEVER claim a lead was\n"
+        "  created, updated or found, and never invent a lead ID, when the tool did not succeed.\n"
+        "- If a tool returns an error, report the actual failure rather than retrying blindly.\n\n"
         "## Output Rules\n"
-        "- NEVER use markdown tables. Use bold headings and bullet points.\n"
-        "- When listing leads, present each as: **Lead Name** — Status: X, Source: Y, Created: Z.\n"
-        "- When showing pipeline analysis, use bold labels: **Open**: 18, **Replied**: 10, etc.\n"
-        "- After creating or updating a lead, confirm the action with the lead ID and key details.\n"
+        "- Markdown renders properly here: use a table when listing 4+ records with the same fields,\n"
+        "  bold labels and bullets for anything shorter.\n"
+        "- When listing leads, show: name (the ERPNext ID), lead_name, status, source, created.\n"
+        "- After creating or updating a lead, confirm with the ERPNext lead ID the tool returned.\n"
         "- Proactively suggest next actions (e.g., 'Would you like to schedule a follow-up?').\n"
     ),
     tools=[
         create_erpnext_lead_tool, read_erpnext_lead_tool,
-        update_erpnext_lead_tool, analyze_crm_data_tool, get_chatbot_link_tool,
+        update_erpnext_lead_tool, analyze_crm_data_tool,
     ],
     )
 
@@ -462,7 +608,8 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         "- Event title, start/end time, attendees, and the Google Calendar link (html_link).\n"
         "- If the tool returned an error, show the error — do NOT make up a fake confirmation.\n\n"
         "## Output Rules\n"
-        "- NEVER use markdown tables. Use bold headings and bullet points.\n"
+        "- Markdown renders properly here: use bold headings, bullets, and a table when listing\n"
+        "  several time slots or recipients with the same fields.\n"
         "- Always confirm actions with REAL data from tool responses.\n"
         "- NEVER invent event IDs, calendar links, or time slots.\n"
     ),
@@ -569,6 +716,8 @@ async def run_orchestrator(
             erpnext=creds.get("erpnext"),
             google_places=creds.get("google_places"),
             google_calendar=creds.get("google_calendar"),
+            lead_sources=creds.get("lead_sources"),
+            google_dork_search=creds.get("google_dork_search"),
         )
         result = await Runner.run(
             starting_agent=build_orchestrator(llm_config),
@@ -631,6 +780,8 @@ async def run_orchestrator_with_events(
             erpnext=creds.get("erpnext"),
             google_places=creds.get("google_places"),
             google_calendar=creds.get("google_calendar"),
+            lead_sources=creds.get("lead_sources"),
+            google_dork_search=creds.get("google_dork_search"),
         )
         result = Runner.run_streamed(
             starting_agent=build_orchestrator(llm_config),

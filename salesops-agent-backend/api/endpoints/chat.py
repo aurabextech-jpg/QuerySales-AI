@@ -49,6 +49,10 @@ async def _resolve_integrations(user: User, db: AsyncSession) -> dict:
         "erpnext": await resolve_integration_config(user.id, "erpnext", db),
         "google_places": await resolve_integration_config(user.id, "google_places", db),
         "google_calendar": await resolve_calendar_credentials(user, db),
+        "lead_sources": await resolve_integration_config(user.id, "lead_sources", db),
+        "google_dork_search": await resolve_integration_config(
+            user.id, "google_dork_search", db
+        ),
     }
 
 

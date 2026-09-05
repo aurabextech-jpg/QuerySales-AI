@@ -73,8 +73,9 @@ export default async function SettingsPage() {
       <div className="pt-2">
         <h3 className="text-sm font-semibold text-fg">Integrations</h3>
         <p className="mt-0.5 text-sm text-fg-secondary">
-          Connect your own CRM and Google services. Credentials are encrypted at
-          rest and scoped to your account.
+          Connect your own CRM, search and Google services, and list the source
+          pages the agent may mine for leads. Credentials are encrypted at rest
+          and scoped to your account.
         </p>
       </div>
 

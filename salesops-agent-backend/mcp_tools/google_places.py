@@ -247,7 +247,8 @@ async def search_leads_multi(
             SearchBusinessesInput(
                 query=q,
                 max_results=input_data.max_results_per_query,
-            )
+            ),
+            creds,
         )
         for q in queries
     ]
@@ -269,6 +270,21 @@ async def search_leads_multi(
                 if pid and pid not in seen_ids:
                     seen_ids.add(pid)
                     merged.append(place)
+
+    # Every sub-query failed — surface why. Reporting "success, 0 results" here
+    # would tell the user their city has no such businesses when the real cause
+    # is a missing or rejected API key (rule §3.5: no silent failures).
+    if not queries_used:
+        first_failure = next(
+            (r for r in results_list if isinstance(r, dict) and r.get("status") == "error"),
+            None,
+        )
+        if first_failure:
+            return {
+                "status": "error",
+                "reason": first_failure.get("reason", "search_failed"),
+                "message": first_failure.get("message", "Every Places query failed."),
+            }
 
     # Sort by rating descending (None → 0)
     merged.sort(key=lambda p: (p.get("rating") or 0), reverse=True)

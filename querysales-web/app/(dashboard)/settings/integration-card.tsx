@@ -1,6 +1,6 @@
 /**
  * Integration card — one third-party provider (ERPNext · Google Places ·
- * Google Calendar).
+ * Lead Source Sites · Google Dork Search · Google Calendar).
  *
  * The field list is driven entirely by the backend registry, so adding a
  * provider server-side needs no change here. Secret inputs start empty and
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusPill } from "@/components/ui/status";
 import { useRouter } from "next/navigation";
 import type { Integration } from "@/lib/types";
@@ -176,16 +177,29 @@ export function IntegrationCard({ integration }: { integration: Integration }) {
                     <span className="ml-1 font-normal text-fg-muted">(optional)</span>
                   )}
                 </Label>
-                <Input
-                  id={`${integration.provider}-${field.name}`}
-                  name={field.name}
-                  type={field.secret ? "password" : "text"}
-                  autoComplete="off"
-                  value={values[field.name] ?? ""}
-                  onChange={(e) => set(field.name, e.target.value)}
-                  placeholder={field.placeholder}
-                  disabled={disabled}
-                />
+                {field.multiline ? (
+                  <Textarea
+                    id={`${integration.provider}-${field.name}`}
+                    name={field.name}
+                    rows={4}
+                    value={values[field.name] ?? ""}
+                    onChange={(e) => set(field.name, e.target.value)}
+                    placeholder={field.placeholder}
+                    disabled={disabled}
+                    className="font-mono text-xs"
+                  />
+                ) : (
+                  <Input
+                    id={`${integration.provider}-${field.name}`}
+                    name={field.name}
+                    type={field.secret ? "password" : "text"}
+                    autoComplete="off"
+                    value={values[field.name] ?? ""}
+                    onChange={(e) => set(field.name, e.target.value)}
+                    placeholder={field.placeholder}
+                    disabled={disabled}
+                  />
+                )}
                 {(field.help || field.secret) && (
                   <p className="mt-1 text-xs text-fg-muted">
                     {field.help ||

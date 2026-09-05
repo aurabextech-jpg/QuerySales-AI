@@ -205,6 +205,8 @@ export interface IntegrationField {
   required: boolean;
   placeholder: string;
   help: string;
+  /** Render as a textarea — a list value stored as one entry per line. */
+  multiline: boolean;
 }
 
 /**

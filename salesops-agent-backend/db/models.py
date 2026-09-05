@@ -437,7 +437,8 @@ class UserIntegrationConfig(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    # One of core.integrations.PROVIDERS — erpnext · google_places · google_calendar
+    # One of core.integrations.PROVIDERS — erpnext · google_places ·
+    # lead_sources · google_dork_search · google_calendar
     provider = Column(String, nullable=False, index=True)
     enabled = Column(Boolean, default=True, nullable=False)
     config = Column(JSON, nullable=False, default=dict)

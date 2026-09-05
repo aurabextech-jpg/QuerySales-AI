@@ -28,6 +28,10 @@ class IntegrationField:
     required: bool = True
     placeholder: str = ""
     help: str = ""
+    # Renders as a textarea instead of a single-line input. The value is still
+    # one string — a list-valued field (lead source sites) is stored as one
+    # URL per line, which keeps every layer's dict[str, str] typing intact.
+    multiline: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,55 @@ INTEGRATIONS: dict[str, IntegrationSpec] = {
                 label="API key",
                 secret=True,
                 placeholder="AIza…",
+            ),
+        ),
+    ),
+    "lead_sources": IntegrationSpec(
+        provider="lead_sources",
+        label="Lead Source Sites",
+        description=(
+            "Your own list of public pages the agent may search for leads — "
+            "directories, member lists, exhibitor lists, industry news."
+        ),
+        fields=(
+            IntegrationField(
+                name="site_urls",
+                label="Source page URLs",
+                multiline=True,
+                placeholder=(
+                    "https://chamber.example.org/members\n"
+                    "https://expo.example.com/exhibitors"
+                ),
+                help=(
+                    "One URL per line, up to 10. The agent fetches each page and "
+                    "returns the passages, links and contacts matching its query."
+                ),
+            ),
+        ),
+    ),
+    "google_dork_search": IntegrationSpec(
+        provider="google_dork_search",
+        label="Google Dork Search",
+        description=(
+            "Targeted web search over Google's public index using advanced "
+            "operators (site:, intitle:, inurl:) for lead discovery."
+        ),
+        fields=(
+            IntegrationField(
+                name="api_key",
+                label="Custom Search API key",
+                secret=True,
+                placeholder="AIza…",
+                help="A Google Cloud API key with the Custom Search API enabled.",
+            ),
+            IntegrationField(
+                name="cx",
+                label="Search engine ID (cx)",
+                placeholder="a1b2c3d4e5f6g7h8i",
+                help=(
+                    "From programmablesearchengine.google.com. Set it to search "
+                    "the entire web, otherwise site: operators cannot match."
+                ),
             ),
         ),
     ),
