@@ -45,6 +45,7 @@ QUERY_GAP_SECONDS = 1.0
 _LISTICLE_RE = re.compile(r"\b(top \d+|list of|best \d*|\d+ best|directory|companies in)\b", re.I)
 _TITLE_SPLIT_RE = re.compile(r"\s+[|–—:-]\s+")
 _GENERIC_TITLE_PARTS = {"home", "contact us", "contact", "about us", "welcome", "official website"}
+_GENERIC_PREFIX_RE = re.compile(r"^(about us|contact us|home|welcome to)\b[\s:,-]*", re.I)
 
 
 class FindLeadsInput(BaseModel):
@@ -57,7 +58,8 @@ class FindLeadsInput(BaseModel):
 def _company_name(title: str, domain: str) -> str:
     """The company's name from a page title: 'Contact Us - Indus Group' → 'Indus Group'."""
     parts = [p.strip() for p in _TITLE_SPLIT_RE.split(title) if p.strip()]
-    named = [p for p in parts if p.lower() not in _GENERIC_TITLE_PARTS]
+    named = [_GENERIC_PREFIX_RE.sub("", p).strip() for p in parts]
+    named = [p for p in named if p and p.lower() not in _GENERIC_TITLE_PARTS]
     if named:
         return min(named, key=len) if len(named) > 1 and len(named[0]) > 60 else named[0]
     return domain.split(".")[0].replace("-", " ").title()
@@ -175,6 +177,11 @@ async def find_leads(input_data: FindLeadsInput, dork_creds: Any = None) -> dict
         ResearchCompaniesInput(companies=candidates[: input_data.max_leads], city=input_data.city),
         dork_creds,
     )
+    discovered_by_search = {c.website for c in candidates if c.website and not c.profile_url}
+    for company in research["companies"]:
+        declared = company.pop("site_name", None)
+        if declared and company.get("website") in discovered_by_search:
+            company["name"] = declared
     in_city = [c for c in research["companies"] if c.get("city_match") is not False]
     elsewhere = [c for c in research["companies"] if c.get("city_match") is False]
     result: dict[str, Any] = {"status": "success", "leads": in_city, "notes": notes}

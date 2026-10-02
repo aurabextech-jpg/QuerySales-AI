@@ -21,11 +21,10 @@ from agents import (
     ItemHelpers,
     AsyncOpenAI,
     OpenAIChatCompletionsModel,
-    ModelSettings,
 )
 from agents.tracing import set_trace_processors
 
-from agent_core.model_factory import build_model
+from agent_core.model_factory import build_model, build_model_settings
 from core.user_config import ResolvedLLMConfig
 from agent_core.tracing import DatabaseTracingProcessor, current_run_id, flush_pending_writes
 
@@ -471,8 +470,10 @@ Tools
 - outreach: send email, check Google Calendar availability, create events.
 
 Rules
-- Read-only work (search, research, scoring) needs no permission. Ask before writes: creating or
-  updating CRM records, sending email, creating events.
+- Read-only work (search, research, scoring) needs no permission.
+- Call crm_management or outreach ONLY when the user's latest message explicitly asks for that
+  action (e.g. "add them to the CRM", "email them"). Never right after find_leads_tool.
+- Sub-agent tools take one argument, input: a plain-language instruction, never JSON.
 - Ask one question only when a required value is missing (no industry or city, no lead ID).
 - Call a tool once per user message. If it returns nothing, report its notes; do not retry.
 - Report only what tools returned. Never invent contacts, IDs, availability or confirmations.
@@ -505,7 +506,7 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     configures one provider, so there is only one model to route to.
     """
     model = build_model(llm_cfg)
-    model_settings = ModelSettings(include_usage=True)
+    model_settings = build_model_settings(llm_cfg)
 
     lead_gen_agent = Agent[AgentContext](
     name="LeadGenAgent",
@@ -759,45 +760,36 @@ async def run_orchestrator_with_events(
             lead_sources=creds.get("lead_sources"),
             google_dork_search=creds.get("google_dork_search"),
         )
-        result = Runner.run_streamed(
+        logger.info("Agent run started for run_id=%s", run_id)
+
+        # Not run_streamed: Vercel buffers the response anyway, and the SDK
+        # refuses to retry a streamed call once any chunk has arrived — so a
+        # malformed tool call from a small model (Groq "tool_use_failed") failed
+        # the whole chat. A non-streamed call is retried by build_model_settings.
+        result = await Runner.run(
             starting_agent=build_orchestrator(llm_config),
             input=_build_input(messages),
             context=context,
             max_turns=ORCHESTRATOR_MAX_TURNS,
         )
 
-        logger.info("Agent run started for run_id=%s", run_id)
-
-        async for event in result.stream_events():
-            # ── Agent hand-off (thinking indicator) ──────────────────
-            if event.type == "agent_updated_stream_event":
-                agent_name = event.new_agent.name
-                logger.info("Agent hand-off → %s (run=%s)", agent_name, run_id)
+        last_agent = None
+        for item in result.new_items:
+            agent_name = getattr(getattr(item, "agent", None), "name", None)
+            if agent_name and agent_name != last_agent:
                 steps.append({"type": "agent", "agent": agent_name})
+                last_agent = agent_name
 
-            # ── Tool lifecycle ───────────────────────────────────────
-            elif event.type == "run_item_stream_event":
-                item = event.item
-
-                if item.type == "tool_call_item":
-                    current_tool_name = getattr(
-                        item, "name",
-                        getattr(
-                            getattr(item, "raw_item", None), "name", "unknown"
-                        ),
-                    )
-                    logger.info("Tool call: %s (run=%s)", current_tool_name, run_id)
-                    steps.append({"type": "tool_start", "tool": current_tool_name})
-
-                elif item.type == "tool_call_output_item":
-                    output_preview = str(item.output)[:500]
-                    steps.append({
-                        "type": "tool_result",
-                        "tool": current_tool_name,
-                        "content": output_preview,
-                    })
-
-            # Token deltas are not collected — we use final_output
+            if item.type == "tool_call_item":
+                current_tool_name = getattr(getattr(item, "raw_item", None), "name", "unknown")
+                logger.info("Tool call: %s (run=%s)", current_tool_name, run_id)
+                steps.append({"type": "tool_start", "tool": current_tool_name})
+            elif item.type == "tool_call_output_item":
+                steps.append({
+                    "type": "tool_result",
+                    "tool": current_tool_name,
+                    "content": str(item.output)[:500],
+                })
 
         # Run complete — flush tracing writes
         await flush_pending_writes()

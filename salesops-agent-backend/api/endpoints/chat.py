@@ -151,6 +151,17 @@ async def _resolve_run_id(
     return db_run.id
 
 
+MALFORMED_TOOL_CALL_HINT = (
+    "the model produced an invalid tool call even after retrying — this happens with small "
+    "models; send the request again, or choose a larger model in Settings → AI / LLM"
+)
+
+
+def _is_malformed_tool_call(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "tool_use_failed" in message or "tool call validation failed" in message
+
+
 def _build_messages(request: ChatRequest) -> list[dict]:
     """Request messages as dicts. The system prompt is the agent's instructions,
     so it is not added here — that sent it twice on every model call."""
@@ -341,6 +352,17 @@ async def chat_stream(
             401: "your LLM API key was rejected — check it in Settings → AI / LLM",
             429: "your LLM provider is rate-limiting requests — wait a minute and retry",
         }.get(exc.status_code, f"your LLM provider returned HTTP {exc.status_code}")
+        if _is_malformed_tool_call(exc):
+            hint = MALFORMED_TOOL_CALL_HINT
+        raise HTTPException(status_code=502, detail=f"The agent stopped: {hint}.")
+    except openai.APIError as exc:
+        # Errors without an HTTP status: a provider error mid-response, or a
+        # tool call the provider rejected (Groq "tool call validation failed").
+        logger.error("chat_stream LLM provider error: %s", exc, exc_info=True)
+        hint = (
+            MALFORMED_TOOL_CALL_HINT if _is_malformed_tool_call(exc)
+            else "your LLM provider returned an error — try again"
+        )
         raise HTTPException(status_code=502, detail=f"The agent stopped: {hint}.")
     except Exception as exc:
         logger.error(

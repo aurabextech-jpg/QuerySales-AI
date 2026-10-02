@@ -21,7 +21,7 @@ from agents import Agent, Runner
 from agents.tracing import set_trace_processors
 
 from agent_core.events import emit, OBSERVE, RETRIEVE, REASON, PLAN, TOOL_CALL, COMPLETE, ERROR
-from agent_core.model_factory import build_model
+from agent_core.model_factory import build_model, build_model_settings
 from agent_core.sales_tools import (
     SalesAgentContext,
     search_knowledge_tool,
@@ -113,13 +113,14 @@ Follow this loop strictly:
 # ── Agent builder ─────────────────────────────────────────────────────────
 
 
-def _build_agent(model) -> Agent:
+def _build_agent(model, model_settings) -> Agent:
     """Build the sales analysis agent with tools and structured output."""
     try:
         return Agent(
             name="SalesAnalyst",
             instructions=SYSTEM_PROMPT,
             model=model,
+            model_settings=model_settings,
             tools=[
                 search_knowledge_tool,
                 get_lead_tool,
@@ -139,6 +140,7 @@ def _build_agent(model) -> Agent:
             instructions=SYSTEM_PROMPT + "\n\nReturn your analysis as a JSON object matching this schema: "
             "{lead_score, qualification, reasoning, pain_points, matched_knowledge, recommended_action, outreach: {subject, body}}",
             model=model,
+            model_settings=model_settings,
             tools=[
                 search_knowledge_tool,
                 get_lead_tool,
@@ -224,7 +226,7 @@ async def run_sales_agent(
     # ── 5. Build and run agent ────────────────────────────────────────
     try:
         model = build_model(llm_cfg)
-        agent = _build_agent(model)
+        agent = _build_agent(model, build_model_settings(llm_cfg))
 
         ctx = SalesAgentContext(
             run_id=run.id,

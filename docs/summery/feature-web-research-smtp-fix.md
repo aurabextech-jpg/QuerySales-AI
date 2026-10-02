@@ -100,6 +100,32 @@ Verification: `pytest` 39 passed; strict tool schemas build; `_build_input` chec
 **Not yet verified:** a complete real-LLM run with the compact prompts — blocked by the Groq daily
 quota; to be re-run with the user's new key.
 
+## Update — production log fixes (same day)
+
+A deployed run (Vercel, Groq `gpt-oss-20b`, new key) showed `find_leads` working (8 Karachi
+plastics companies in ~11 s), then three faults:
+
+1. **Unrequested CRM write attempt.** The orchestrator called `crm_management` right after
+   `find_leads` (the CRM agent did stop to ask for confirmation — no ERPNext record was created).
+   Prompt now: call `crm_management`/`outreach` only when the latest user message explicitly asks.
+2. **Malformed tool calls** — Groq rejects gpt-oss tool calls with bad JSON (`tool_use_failed`,
+   400) or wrong arguments (`tool call validation failed`, mid-stream `APIError`). The SDK will
+   not retry a streamed call once chunks arrived, so the chat run is now **non-streamed**
+   (`Runner.run`; steps rebuilt from `result.new_items`) and every agent gets
+   `ModelRetrySettings(max_retries=2)` with a policy that re-samples malformed tool calls and
+   retries 429s up to a 30 s `retry-after` (longer = daily quota → fail fast). `chat.py` maps any
+   remaining case to an actionable message.
+3. **Hidden reasoning tokens** — 1,023 of 1,065 output tokens on one call. `build_model_settings`
+   sends `reasoning_effort=low` for gpt-oss / o-series / gpt-5 only (other models reject it).
+
+Also: company names come from the site's declared name (JSON-LD / `og:site_name`) when discovered
+via search — "About Us Molding Company" → "Mediplas Innovations", "Flexible Packaging
+Manufacturer in Karachi" → "Tanvir Packages (Pvt) Ltd."; generic title prefixes are stripped.
+
+Verification: `pytest` 44 passed (new `tests/test_model_factory.py`: reasoning gating, retry
+policy, history building). Real run with the new key: 1 tool call, 2 s, correct behaviour; this
+machine's IP is still DuckDuckGo-blocked, so the success path was verified on the deployed log.
+
 ## Known gaps / follow-ups
 
 - DuckDuckGo may rate-limit bursts; `research_companies` caps concurrency at 4 and degrades to a

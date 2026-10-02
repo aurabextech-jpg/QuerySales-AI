@@ -768,6 +768,11 @@ async def _research_one(
                 home = _extract(page, url)
                 _merge(profile, home)
                 profile["sources"].append(url)
+                # The name the site declares (JSON-LD / og:site_name) beats one
+                # guessed from a search-result title ("About Us Molding Company").
+                declared = (home.get("name") or "").strip()
+                if declared and declared.lower() != company.name.lower() and len(declared) <= 60:
+                    profile["site_name"] = declared
                 # One extra hop, only when the homepage lacked a way to reach them.
                 contact_url = home.get("contact_page")
                 if contact_url and (not profile["emails"] or not profile["phones"]):
