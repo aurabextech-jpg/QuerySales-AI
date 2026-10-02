@@ -19,6 +19,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
+from mcp_tools.web_research import directory_structure
+
 logger = logging.getLogger(__name__)
 
 # One page per configured URL, fetched once per call — a cap keeps a long list
@@ -191,7 +193,11 @@ async def search_source_sites(
 
         text = _visible_text(html)
         snippets = _match_snippets(text, keywords, input_data.max_results_per_site)
-        if not snippets:
+        # Directory entries rarely contain the query words ("Crest LED" never says
+        # "manufacturing Karachi"), so keyword matching alone misses every company.
+        # Return the page's own listings, filters and pagination as well.
+        structure = directory_structure(html, url)
+        if not snippets and not structure:
             continue
 
         matched_text = " ".join(snippets)
@@ -203,6 +209,7 @@ async def search_source_sites(
             "phones": sorted({
                 p.strip() for p in _PHONE_RE.findall(matched_text) if len(p.strip()) >= 9
             })[:10],
+            **structure,
         })
 
     return {

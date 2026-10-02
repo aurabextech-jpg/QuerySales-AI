@@ -13,6 +13,8 @@ return them as a single JSON body.
 
 import logging
 
+import openai
+from agents.exceptions import MaxTurnsExceeded
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -274,6 +276,7 @@ async def chat_stream(
     with a typewriter effect — giving a ChatGPT/Claude experience
     without requiring true SSE streaming.
     """
+    run_id = request.run_id
     try:
         # Guard: block trivial/greeting messages before hitting the LLM
         # Only apply the guard if this is the very first user message.
@@ -319,6 +322,25 @@ async def chat_stream(
 
     except ConfigurationMissing as exc:
         raise HTTPException(status_code=400, detail=exc.message)
+    except MaxTurnsExceeded:
+        # Not a crash: the request was bigger than one run's step budget. Answer
+        # in the chat so the user can narrow it, instead of a generic failure.
+        logger.warning("chat_stream hit the turn limit (run=%s)", run_id)
+        message = (
+            "I ran out of steps before finishing this request. Try narrowing it — "
+            "one industry and one city, or up to 8 companies at a time."
+        )
+        await _save_message(db, run_id, "assistant", message)
+        return {"run_id": run_id, "status": "completed", "steps": [], "message": message}
+    except openai.APIStatusError as exc:
+        # The user's own LLM provider refused the call. Say which kind of refusal
+        # so they can act on it; the provider's body is logged, never returned.
+        logger.error("chat_stream LLM provider error %s: %s", exc.status_code, exc, exc_info=True)
+        hint = {
+            401: "your LLM API key was rejected — check it in Settings → AI / LLM",
+            429: "your LLM provider is rate-limiting requests — wait a minute and retry",
+        }.get(exc.status_code, f"your LLM provider returned HTTP {exc.status_code}")
+        raise HTTPException(status_code=502, detail=f"The agent stopped: {hint}.")
     except Exception as exc:
         logger.error(
             "chat_stream error: %s", exc, exc_info=True

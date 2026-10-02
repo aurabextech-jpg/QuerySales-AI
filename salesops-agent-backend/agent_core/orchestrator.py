@@ -82,6 +82,10 @@ from mcp_tools.google_calendar import (
 )
 from mcp_tools.lead_sources import search_source_sites, SearchSourceSitesInput
 from mcp_tools.google_dork import dork_search, DorkSearchInput
+from mcp_tools.web_research import (
+    web_search, scrape_page, research_companies,
+    CompanyRef, WebSearchInput, ScrapePageInput, ResearchCompaniesInput,
+)
 
 
 async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -> dict:
@@ -112,6 +116,14 @@ async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -
                 return await search_source_sites(SearchSourceSitesInput(**arguments), sources)
             case "dork_search":
                 return await dork_search(DorkSearchInput(**arguments), dork)
+            # Web research needs no integration: it uses the user's Google key
+            # when they have one and keyless DuckDuckGo otherwise.
+            case "web_search":
+                return await web_search(WebSearchInput(**arguments), dork)
+            case "scrape_page":
+                return await scrape_page(ScrapePageInput(**arguments))
+            case "research_companies":
+                return await research_companies(ResearchCompaniesInput(**arguments), dork)
             case "send_email":
                 return await send_email(
                     arguments["to_email"], arguments["subject"],
@@ -298,7 +310,9 @@ async def search_source_sites_tool(
 
     Returns:
         {"status": "success", "results": [{source_url, matches, links, emails,
-        phones}], "unreachable": [...]}. Cite the source_url for every lead you
+        phones, listings, filters, pagination}], "unreachable": [...]}.
+        `listings` are the directory's company entries — pass their urls as
+        `profile_url` to research_companies_tool. Cite the source_url for every lead you
         report. When "reason" is "not_configured", tell the user to add page
         URLs in Settings -> Integrations -> Lead Source Sites.
     """
@@ -337,6 +351,81 @@ async def dork_search_tool(
     """
     return await _call("dork_search", {
         "query": query, "max_results": max_results,
+    }, context=wrapper.context)
+
+
+@function_tool
+async def web_search_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    query: str, max_results: int = 8,
+) -> dict:
+    """Search the public web. Always available — no integration needed.
+
+    Use it to find candidate companies ("plastic manufacturers Karachi",
+    "list of textile mills in Faisalabad") or pages about one company.
+
+    Args:
+        query: Plain search query. Include the city for local discovery.
+        max_results: 1-10 results (default 8).
+
+    Returns:
+        {"status": "success", "engine", "results": [{title, url, domain, snippet}]}.
+        Snippets are previews only — confirm contacts with research_companies_tool.
+    """
+    return await _call("web_search", {
+        "query": query, "max_results": max_results,
+    }, context=wrapper.context)
+
+
+@function_tool
+async def scrape_page_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    url: str, include_text: bool = False,
+) -> dict:
+    """Read ONE web page and return only its useful structured data.
+
+    Works on any public URL — including a directory link the user pastes in
+    chat (no Settings step needed). Returns compact fields, not page text:
+    title, name, description, emails, phones, address, rating, social links,
+    contact_page, and for directories: `listings` (each company's detail page),
+    `external_sites`, `pagination` (more result pages) and `filters` (the
+    page's own search options, e.g. {"industry": [...], "location": [...]}).
+
+    For a directory: if `filters` exist, re-scrape the URL with the filters as
+    query parameters (e.g. ?industry=Manufacturing&location=Karachi) — that is
+    the site's own filtering and far more accurate than reading every listing.
+
+    Args:
+        url: Absolute http(s) URL.
+        include_text: Add a ~1500-character text excerpt. Only when the
+            structured fields are not enough — it costs tokens.
+    """
+    return await _call("scrape_page", {
+        "url": url, "include_text": include_text,
+    }, context=wrapper.context)
+
+
+@function_tool
+async def research_companies_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    companies: list[CompanyRef], city: str = "",
+) -> dict:
+    """Enrich up to 8 companies in ONE call: website, contacts, rating, score.
+
+    For each company it finds the official website (web search), reads the
+    homepage and, if needed, the contact page, and returns a compact profile:
+    website, emails, phones, address, rating, review_count, social, sources,
+    city_match, plus a 0-100 `score`, `tier` (High/Medium/Low) and
+    `score_breakdown`. Read-only — call it without asking the user first.
+
+    Args:
+        companies: [{"name": "...", "website": "optional", "profile_url":
+            "optional directory page about the company"}]. Pass what you
+            already know — a known website or profile_url skips a search.
+        city: City the user asked about; sets `city_match` for each company.
+    """
+    return await _call("research_companies", {
+        "companies": [c.model_dump() for c in companies], "city": city,
     }, context=wrapper.context)
 
 
@@ -409,22 +498,30 @@ You manage specialized agents:
 - outreach: Draft emails, check REAL Google Calendar availability, and create REAL calendar events.
 
 # Strategy
-1. Delegate broad lead discovery requests to `lead_generation`. Pass along which source the user
-   asked for — their own sources, a map/local search, or the wider public web — when they said.
+1. Delegate lead discovery to `lead_generation` IMMEDIATELY. Pass the industry, the city, any URL
+   the user gave (verbatim), and what they want back (e.g. "with contact details"). NEVER ask the
+   user to pick a source: `lead_generation` uses every available source plus built-in web search,
+   and researches each company's website, phone, email and rating itself.
+   For follow-ups about earlier leads ("get their contact info", "research these"), delegate again
+   with the company names AND any URLs that appeared earlier in the conversation.
 2. Delegate CRM tasks (creating/reading/updating leads, pipeline analysis) to `crm_management`.
 3. Delegate ALL scheduling, meeting, availability, and email tasks to `outreach`. This agent has access to the user's real Google Calendar — it is NOT a simulation.
 4. When leads are discovered, proactively ask the user which ones they want to add to the CRM, then delegate to `crm_management`.
 5. After adding leads to the CRM, suggest next steps like scheduling a follow-up call or sending an introductory email.
 
 # Lead Workflow
-- When showing discovered leads, assign an **Opportunity Score** (High / Medium / Low) based on rating, reviews, and contact availability.
+- `lead_generation` returns leads already researched and scored (tier + 0-100 score). Keep its
+  scores, contact columns and source links — do not re-score, drop columns, or summarise them away.
 - Group leads by score: **High Opportunity** first, then **Medium**, then **Low**.
 - Always ask: "Would you like me to add any of these leads to your CRM? You can filter by score or pick specific ones."
-- When adding leads to CRM, extract: name, email, phone, and source (Google Places).
+- When adding leads to CRM, pass: name, email, phone, and the source URL reported for that lead.
 
-# Ambiguity Protocol
-IF intent unclear OR missing params (industry, city, lead-ID):
-  → Ask ONE targeted clarification question. Do NOT guess or hallucinate parameters.
+# Autonomy & Ambiguity Protocol
+- Read-only work needs NO permission: searching, reading web pages, looking up contact details,
+  scoring. Just do it and report the result.
+- Ask before WRITES only: creating/updating CRM records, sending email, creating calendar events.
+- Ask ONE clarification question only when a required parameter is truly missing (e.g. no
+  industry AND no city for discovery, or no lead-ID for an update). Do NOT guess parameters.
 
 # Time & Date Resolution
 - You will receive the 'Current Date and Time' in the [System Context] of your input.
@@ -443,9 +540,9 @@ IF intent unclear OR missing params (industry, city, lead-ID):
   - **Markdown table** for 4+ items sharing the same fields (lead lists, pipeline breakdowns).
   - **Bold-titled bullets** for 1-3 items, or when each item carries different detail.
 - Example table:
-  | Lead | Opportunity | Rating | Phone | Source |
-  | --- | --- | --- | --- | --- |
-  | Al-Shifa Clinic | High | 4.5 (230) | +92-42-35761234 | Google Places |
+  | Company | Tier (score) | Phone | Email | Website | Rating | City | Source |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Al-Shifa Clinic | High (82) | +92-42-35761234 | info@alshifa.pk | alshifa.pk | 4.5 (230) | Lahore | Google Places |
 - Example bullets:
   **Al-Shifa Clinic** (Opportunity: High)
   - Address: 45-A, Main Boulevard, Gulberg III, Lahore
@@ -470,6 +567,13 @@ IF intent unclear OR missing params (industry, city, lead-ID):
 """
 
 
+# Turn budgets. A turn is one model call; lead research is discover -> verify
+# -> enrich -> report plus the odd retry, which overran the SDK default of 10
+# and surfaced to users as "The agent could not complete your request".
+ORCHESTRATOR_MAX_TURNS = 12
+LEAD_GEN_MAX_TURNS = 16
+
+
 def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     """Build the orchestrator and its sub-agents for one user, one run.
 
@@ -486,47 +590,63 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model_settings=model_settings,
     instructions=(
         "You are a specialized Lead Generation Agent. Your job is to discover and enrich potential business leads.\n\n"
-        "## Choosing a source\n"
-        "You have three independent discovery sources. Pick by what the user is asking for,\n"
-        "and combine them when a request spans more than one.\n"
-        "1. `search_leads_multi_tool` / `search_businesses_tool` (Google Places) — local businesses\n"
-        "   by industry and city. Best for 'find X companies in Y'. Returns ratings, phone, website.\n"
-        "   Use `search_leads_multi_tool` for broad discovery, `search_businesses_tool` for one precise query.\n"
-        "2. `search_source_sites_tool` — the user's OWN curated directories and member lists.\n"
-        "   Try this FIRST whenever they say 'my sources', 'our list', or name a directory: these are\n"
-        "   pages they already trust, so hits are higher-signal than the open web.\n"
-        "3. `dork_search_tool` — the public web via Google operators. Use it for what a map search\n"
-        "   cannot answer: job titles and decision-makers, companies using a specific technology,\n"
-        "   tenders, association member pages, conference speaker lists.\n"
-        "   Build precise queries: site:linkedin.com/in \"head of procurement\" \"Lahore\" ·\n"
-        "   intitle:\"our members\" textile association · site:example.com \"case study\".\n"
-        "   Start with one operator, and re-run narrower if results are noisy.\n"
-        "4. Enrich top Places prospects with `get_place_details_tool` for phone, website, address.\n\n"
+        "## Work autonomously\n"
+        "Finding and researching companies is read-only, so never stop to ask which source to use\n"
+        "or whether to look up contact details — do the whole job in one pass:\n"
+        "DISCOVER -> VERIFY -> ENRICH -> SCORE -> REPORT.\n"
+        "\n"
+        "## 1. DISCOVER — collect candidate companies\n"
+        "- The user gave a URL: call `scrape_page_tool` on it. A directory returns `listings`,\n"
+        "  `filters` and `pagination`. If `filters` cover the request (industry, city), re-scrape with\n"
+        "  them as query parameters, e.g. ?industry=Manufacturing&location=Karachi — the site's own\n"
+        "  filter beats guessing. If the filtered page lists 0 companies, say so plainly: that source\n"
+        "  has none, which is an answer, not a failure. Then fall back to web search.\n"
+        "- No URL: run every source that is available: `search_leads_multi_tool` (Google Places —\n"
+        "  ratings and phones), `search_source_sites_tool` (the user's curated pages) and\n"
+        "  `web_search_tool` (always available). For web search, ask for lists, e.g.\n"
+        "  'plastic manufacturers in Karachi', 'top textile companies Karachi list'.\n"
+        "  Use `scrape_page_tool` on a promising list/directory result to pull its `listings`.\n"
+        "- `dork_search_tool` is for decision-makers and niche signals (site:linkedin.com/in ...).\n"
+        "- A source returning reason 'not_configured' is simply skipped — keep going with the others,\n"
+        "  and mention it in one line at the end ('Skipped: Google Places (not configured)').\n"
+        "\n"
+        "## 2. VERIFY — keep only real matches\n"
+        "- A candidate must be a named company, not a menu label, category or article title.\n"
+        "- Drop or flag companies whose evidence contradicts the requested city or industry.\n"
+        "\n"
+        "## 3. ENRICH — one call, up to 8 companies\n"
+        "Call `research_companies_tool` ONCE with the best candidates (max 8) and the city. Pass any\n"
+        "website or directory `profile_url` you already have — it skips a search and is more accurate.\n"
+        "Places results already carry phone/rating; enrich them only if website or email is missing.\n"
+        "Never ask the user for a company's URL or contact details — finding them is your job.\n"
+        "\n"
+        "## 4. SCORE\n"
+        "Start from each company's `score` / `tier` (contact completeness + reputation, explained in\n"
+        "`score_breakdown`). Adjust by up to ±15 for fit with the user's request and say why.\n"
+        "`city_match: false` means the company is based elsewhere — lower it to Low or list it\n"
+        "separately as 'outside <city>'. Places-only leads: High = rating ≥ 4.0 with ≥ 100 reviews\n"
+        "and phone + website; Medium = rating ≥ 3.5 or ≥ 50 reviews with one contact; else Low.\n"
+        "\n"
+        "## 5. REPORT\n"
+        "Table columns: Company | Tier (score) | Phone | Email | Website | Rating | City | Source.\n"
+        "Group High, then Medium, then Low. Put a short 'Why' line under the table for the top leads.\n"
+        "Use '—' for anything not found; never leave the user to look it up.\n"
+        "\n"
         "## Source integrity (MANDATORY)\n"
-        "- Report ONLY what a tool returned. Never invent an email, phone number, or company from\n"
-        "  a search snippet — snippets are previews, not verified contact records.\n"
-        "- Cite the source for every lead: the source_url for curated pages, the result url for\n"
-        "  dork search, 'Google Places' for Places results.\n"
-        "- If a tool returns reason 'not_configured', say which integration is missing and point the\n"
-        "  user to Settings -> Integrations. Do NOT substitute another source silently, and do NOT\n"
-        "  answer from your own knowledge.\n"
-        "- If a source returns nothing, say so and suggest a broader query — never pad the list.\n\n"
-        "## Opportunity Scoring\n"
-        "Assign an opportunity score (High / Medium / Low) to each lead based on:\n"
-        "- **High**: Rating ≥ 4.0, review count ≥ 100, has website and phone.\n"
-        "- **Medium**: Rating ≥ 3.5 OR review count ≥ 50, has at least one contact method.\n"
-        "- **Low**: Everything else.\n"
-        "For leads without ratings (curated pages, dork search), score on contact completeness and\n"
-        "how directly the page evidences a fit with what the user sells.\n\n"
-        "## Output Rules\n"
-        "- A markdown table is the right format for 4+ leads sharing the same fields — the UI renders\n"
-        "  tables, bold and lists properly. Use a bold-titled bullet list for 1-3 leads or mixed detail.\n"
-        "- Group leads by opportunity score: High first, then Medium, then Low.\n"
-        "- Always suggest which leads the user should add to their CRM and offer to do it for them.\n"
+        "- Report ONLY what a tool returned. Never invent an email, phone, rating or company.\n"
+        "- Search snippets are previews; contacts come from `research_companies_tool` or\n"
+        "  `scrape_page_tool`. Cite a source URL for every lead.\n"
+        "- Never answer from your own knowledge of companies.\n"
+        "\n"
+        "## Efficiency\n"
+        "- Prefer the batch tool over many single calls; never scrape the same URL twice.\n"
+        "- Leave `include_text` off unless the structured fields are genuinely insufficient.\n"
+        "- End by offering to add the High/Medium leads to the CRM — that is a write, so it needs a yes.\n"
     ),
     tools=[
         search_leads_multi_tool, search_businesses_tool, get_place_details_tool,
         search_source_sites_tool, dork_search_tool,
+        web_search_tool, scrape_page_tool, research_companies_tool,
     ],
     )
 
@@ -624,7 +744,12 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         tools=[
             lead_gen_agent.as_tool(
                 tool_name="lead_generation",
-                tool_description="Discover and enrich leads",
+                tool_description=(
+                    "Discover companies, research their websites and contact details, and score "
+                    "them. Fully autonomous and read-only — pass industry, city, any URLs and "
+                    "company names; it chooses sources itself."
+                ),
+                max_turns=LEAD_GEN_MAX_TURNS,
             ),
             crm_agent.as_tool(
                 tool_name="crm_management",
@@ -723,6 +848,7 @@ async def run_orchestrator(
             starting_agent=build_orchestrator(llm_config),
             input=_build_input(messages),
             context=context,
+            max_turns=ORCHESTRATOR_MAX_TURNS,
         )
         output = result.final_output or "I processed your request but didn't generate a text response."
         # Flush all queued tracing writes before the response returns
@@ -787,6 +913,7 @@ async def run_orchestrator_with_events(
             starting_agent=build_orchestrator(llm_config),
             input=_build_input(messages),
             context=context,
+            max_turns=ORCHESTRATOR_MAX_TURNS,
         )
 
         logger.info("Agent run started for run_id=%s", run_id)
