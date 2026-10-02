@@ -48,9 +48,12 @@ def test_build_input_drops_system_prompt_and_clips_history():
     text = _build_input([
         {"role": "system", "content": "SECRET PROMPT"},
         {"role": "user", "content": "hi"},
-        {"role": "assistant", "content": "x" * 5000},
+        {"role": "assistant", "content": "o" * 5000},
         {"role": "user", "content": "find plastic companies in Karachi"},
+        {"role": "assistant", "content": "LEADS " + "x" * 4000},
+        {"role": "user", "content": "yes"},
     ])
     assert "SECRET PROMPT" not in text
-    assert text.endswith("User: find plastic companies in Karachi")
-    assert len(text) < 1500
+    assert text.endswith("User: yes")
+    assert text.count("o") < 1300          # older reply clipped
+    assert text.count("x") == 4000         # latest reply kept whole — "yes" acts on it

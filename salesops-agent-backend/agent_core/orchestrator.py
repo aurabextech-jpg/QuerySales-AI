@@ -155,21 +155,15 @@ async def create_erpnext_lead_tool(
     wrapper: RunContextWrapper[AgentContext],
     first_name: str, mobile_no: str, email_id: str,
 ) -> dict:
-    """Create a lead in the user's ERPNext CRM. This writes a REAL record.
-
-    The lead is created submitted (ERPNext docstatus 1), so treat it as final —
-    confirm the details with the user before calling this.
+    """Create one lead in the user's ERPNext CRM (a real, final record). One call per lead.
 
     Args:
-        first_name: Contact or company name for the ERPNext Lead.
-        mobile_no: Phone number. Pass "" when unknown.
-        email_id: Email address. Pass "" when unknown.
+        first_name: Company or contact name.
+        mobile_no: One phone number, or "" when unknown.
+        email_id: One email address, or "" when unknown.
 
-    Returns:
-        {"status": "success", "data": {...}} with the created record, or
-        {"status": "error", "reason": "not_configured"} when the user has no
-        ERPNext credentials — in that case tell them to add ERPNext in
-        Settings -> Integrations. Never claim the lead was created.
+    Returns {"status": "success", "data": {...}} or {"status": "error", ...};
+    reason "not_configured" means ERPNext is not set up.
     """
     return await _call("create_erpnext_lead", {
         "first_name": first_name, "mobile_no": mobile_no,
@@ -471,8 +465,13 @@ Tools
 
 Rules
 - Read-only work (search, research, scoring) needs no permission.
-- Call crm_management or outreach ONLY when the user's latest message explicitly asks for that
-  action (e.g. "add them to the CRM", "email them"). Never right after find_leads_tool.
+- Writes (CRM records, emails, events) need the user's yes, and YOU ask for it — sub-agents
+  cannot talk to the user. Never write right after find_leads_tool.
+  1. User asks for a write: list exactly what will be written and ask "Shall I go ahead?".
+  2. User confirms ("yes"): call the sub-agent ONCE with "User confirmed." plus every detail it
+     needs, copied from the conversation — it cannot see the chat. CRM creates: one line per
+     lead, "name | phone | email | website".
+  3. Report the sub-agent's result per item. Never ask the user to confirm twice.
 - Sub-agent tools take one argument, input: a plain-language instruction, never JSON.
 - Ask one question only when a required value is missing (no industry or city, no lead ID).
 - Call a tool once per user message. If it returns nothing, report its notes; do not retry.
@@ -496,6 +495,7 @@ End with **Next Best Action**.
 # and surfaced to users as "The agent could not complete your request".
 ORCHESTRATOR_MAX_TURNS = 12
 LEAD_GEN_MAX_TURNS = 16
+CRM_MAX_TURNS = 12
 
 
 def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
@@ -543,9 +543,11 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model_settings=model_settings,
     instructions=(
         "You operate the user's ERPNext CRM (optional; the app's own leads live in its database).\n"
-        "Every call is real.\n"
-        "- create_erpnext_lead_tool(first_name, mobile_no, email_id): pass '' for unknowns. Records are\n"
-        "  created SUBMITTED (final): confirm the details with the user first; never batch-create unasked.\n"
+        "Every call is real. You cannot talk to the user: the assistant calling you has already\n"
+        "confirmed any write with them. NEVER ask for confirmation — act on the instruction.\n"
+        "- Create: create_erpnext_lead_tool once per lead in the instruction (first_name = company\n"
+        "  name, mobile_no = first phone, email_id = first email, '' when unknown). Missing contact\n"
+        "  details are not a reason to stop. Records are created SUBMITTED (final).\n"
         "- read_erpnext_lead_tool(lead_id): an ID like CRM-LEAD-2026-00042, not a company name; find it\n"
         "  with analyze_crm_data_tool first.\n"
         "- update_erpnext_lead_tool: only passed fields change. Statuses: Lead, Open, Replied,\n"
@@ -553,7 +555,8 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         "- analyze_crm_data_tool lists raw records: count them yourself, say how many you examined, and\n"
         "  warn that the view may be truncated when the count equals limit.\n"
         "reason 'not_configured': ERPNext is not set up; point to Settings -> Integrations. Never claim\n"
-        "success or invent an ID when a tool failed. Confirm writes with the returned lead ID.\n"
+        "success or invent an ID when a tool failed.\n"
+        "Reply with one line per lead: created (returned lead ID) or failed (the error).\n"
     ),
     tools=[
         create_erpnext_lead_tool, read_erpnext_lead_tool,
@@ -567,6 +570,8 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model_settings=model_settings,
     instructions=(
         "You send email and manage the user's real Google Calendar. Every call is live.\n"
+        "You cannot talk to the user: the assistant calling you has already confirmed any send or\n"
+        "booking with them. Never ask for confirmation — act on the instruction and report.\n"
         "- Email: send_email_tool with a clear subject and call to action.\n"
         "- Scheduling: check_availability_tool(date=YYYY-MM-DD) first, then create_event_tool\n"
         "  (times YYYY-MM-DDTHH:MM:SS with no Z or offset; end defaults to start + 1h; Asia/Karachi).\n"
@@ -599,7 +604,13 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
             ),
             crm_agent.as_tool(
                 tool_name="crm_management",
-                tool_description="Create, read, update or analyze ERPNext CRM leads.",
+                tool_description=(
+                    "Create, read, update or analyze ERPNext CRM leads. It cannot see the chat: "
+                    "for creates pass 'User confirmed.' and one line per lead: "
+                    "name | phone | email | website."
+                ),
+                # One create call per lead: 8 leads + the reply overruns the default 10.
+                max_turns=CRM_MAX_TURNS,
                 failure_error_function=None,
             ),
             outreach_agent.as_tool(
@@ -619,6 +630,10 @@ from datetime import datetime
 # the fastest-growing cost. Old lead tables are the bulk of it and rarely matter.
 MAX_HISTORY_MESSAGES = 8
 MAX_HISTORY_CHARS = 1200
+# Except the latest assistant reply: a follow-up like "yes" or "add them" acts
+# on its details (names, phones, emails). Clipping it made the agent pass
+# "Phone etc." to the CRM and stall in a confirmation loop.
+LATEST_REPLY_CHARS = 6000
 
 
 def _get_current_datetime_context() -> str:
@@ -646,10 +661,16 @@ def _build_input(messages: list[dict]) -> str:
     if last_role != "user":
         earlier.append((last_role, last_content))
 
-    history = "\n".join(
-        f"{role}: {content[:MAX_HISTORY_CHARS]}{' …' if len(content) > MAX_HISTORY_CHARS else ''}"
-        for role, content in earlier[-MAX_HISTORY_MESSAGES:]
+    recent = earlier[-MAX_HISTORY_MESSAGES:]
+    latest_reply = max(
+        (i for i, (role, _) in enumerate(recent) if role == "assistant"), default=-1
     )
+
+    def clip(i: int, content: str) -> str:
+        limit = LATEST_REPLY_CHARS if i == latest_reply else MAX_HISTORY_CHARS
+        return content[:limit] + (" …" if len(content) > limit else "")
+
+    history = "\n".join(f"{role}: {clip(i, content)}" for i, (role, content) in enumerate(recent))
     parts = [f"Conversation so far:\n{history}"] if history else []
     parts += [_get_current_datetime_context(), f"User: {request}"]
     return "\n\n".join(parts)

@@ -126,6 +126,24 @@ Verification: `pytest` 44 passed (new `tests/test_model_factory.py`: reasoning g
 policy, history building). Real run with the new key: 1 tool call, 2 s, correct behaviour; this
 machine's IP is still DuckDuckGo-blocked, so the success path was verified on the deployed log.
 
+## Update — CRM confirmation loop (same day)
+
+Deployed chat: user said "yes" to adding leads; the CRM agent asked to confirm again, then the
+orchestrator answered "I can't add those leads". Causes, from `tool_call_logs`:
+
+- The CRM sub-agent prompt **and** the create tool's docstring said "confirm with the user first".
+  A sub-agent run via `as_tool` **cannot talk to the user** and sees only the `input` string, so
+  it asked every time — even when given complete details.
+- After "yes", the orchestrator's copy of the lead table had been clipped by the 1,200-char
+  history limit, so it passed "Phone etc." instead of the data.
+
+Fix: confirmation lives only in the orchestrator (list → "Shall I go ahead?" → on yes, one call
+with "User confirmed." + one line per lead); CRM and outreach agents never ask, they act and
+report per item; the latest assistant reply is kept up to 6,000 chars; CRM sub-agent
+`max_turns=12` (one create call per lead). Verified by replaying the conversation with the real
+model and a faked `create_erpnext_lead`: confirmation asked once, then 3 creates with full
+name/phone/email. `pytest` 44 passed.
+
 ## Known gaps / follow-ups
 
 - DuckDuckGo may rate-limit bursts; `research_companies` caps concurrency at 4 and degrades to a
