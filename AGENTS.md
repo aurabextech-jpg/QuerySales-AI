@@ -400,9 +400,11 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   every sub-query fails. (3) `get_chatbot_link` targeted
   `/api/method/education.education.chatbot_api.…`, a custom Frappe *education app* RPC that
   404s on any stock ERPNext CRM; it was removed from the tool list, the prompt, and
-  `mcp_tools/erpnext.py`. Note `create_erpnext_lead` still sends `docstatus=1` (submitted, i.e.
-  final) — that is now stated in the tool docstring and the CRM agent's prompt rather than
-  being a silent surprise.
+  `mcp_tools/erpnext.py`. **Correction 2026-10-02:** `create_erpnext_lead` used to send
+  `docstatus=1`; Lead is not a submittable DocType, so ERPNext rejected every create with 403
+  "does not have doctype access via role permission for document Lead" — even for a System
+  Manager. Verified against the demo ERPNext (`docstatus=1` → 403, plain save → passes).
+  Never send `docstatus` for non-submittable DocTypes (Lead, Contact, Customer).
 
 - **2026-09-05 — The "NEVER use markdown tables" prompt rule was inverted.** It existed because
   the old React Native chat could not render them. The web `/agent` view renders GFM markdown

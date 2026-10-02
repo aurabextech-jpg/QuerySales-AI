@@ -1,4 +1,5 @@
 import json
+import re
 import httpx
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
@@ -60,19 +61,30 @@ async def ping_erpnext(creds: Any = None) -> Dict[str, Any]:
         return {"success": False, "message": f"Connection failed: {type(exc).__name__}"}
 
 
-class LeadQuotationItem(BaseModel):
-    item: str
-    qty: int
-    rate: float
-    business_purpose: str
-    list_of_modules: str
-
 class CreateLeadInput(BaseModel):
+    # No `docstatus`: Lead is not a submittable DocType, so sending docstatus=1
+    # ("create and submit") demands a Submit permission no role can hold —
+    # ERPNext answers 403 "does not have doctype access" even for System Manager.
     first_name: str
     mobile_no: str
     email_id: str
-    docstatus: int = 1
-    lead_quot_ct: List[LeadQuotationItem] = []
+
+
+def _frappe_error(response: httpx.Response) -> str:
+    """The human-readable message from a Frappe error body, without HTML tags."""
+    try:
+        body = response.json()
+    except ValueError:
+        return f"HTTP {response.status_code}"
+    message = body.get("exception") or ""
+    raw = body.get("_server_messages")
+    if raw:
+        try:
+            message = json.loads(json.loads(raw)[0]).get("message", message)
+        except (ValueError, TypeError, IndexError, AttributeError):
+            pass
+    message = re.sub(r"<[^>]+>", "", str(message)).split("ValidationError: ")[-1].strip()
+    return message or f"HTTP {response.status_code}"
 
 async def create_erpnext_lead(
     input_data: CreateLeadInput, creds: Any = None
@@ -94,9 +106,10 @@ async def create_erpnext_lead(
                 timeout=10.0
             )
             response.raise_for_status()
-            return {"status": "success", "data": response.json().get("data", {})}
+            data = response.json().get("data", {})
+            return {"status": "success", "data": {"name": data.get("name"), "lead_name": data.get("lead_name")}}
         except httpx.HTTPStatusError as e:
-            return {"status": "error", "message": f"HTTP error occurred: {e}", "details": e.response.text}
+            return {"status": "error", "message": f"ERPNext refused the lead: {_frappe_error(e.response)}"}
         except Exception as e:
             return {"status": "error", "message": f"An error occurred: {str(e)}"}
 

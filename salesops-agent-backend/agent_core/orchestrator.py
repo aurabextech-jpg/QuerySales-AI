@@ -155,7 +155,7 @@ async def create_erpnext_lead_tool(
     wrapper: RunContextWrapper[AgentContext],
     first_name: str, mobile_no: str, email_id: str,
 ) -> dict:
-    """Create one lead in the user's ERPNext CRM (a real, final record). One call per lead.
+    """Create one lead in the user's ERPNext CRM (a real record). One call per lead.
 
     Args:
         first_name: Company or contact name.
@@ -547,7 +547,7 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         "confirmed any write with them. NEVER ask for confirmation — act on the instruction.\n"
         "- Create: create_erpnext_lead_tool once per lead in the instruction (first_name = company\n"
         "  name, mobile_no = first phone, email_id = first email, '' when unknown). Missing contact\n"
-        "  details are not a reason to stop. Records are created SUBMITTED (final).\n"
+        "  details are not a reason to stop.\n"
         "- read_erpnext_lead_tool(lead_id): an ID like CRM-LEAD-2026-00042, not a company name; find it\n"
         "  with analyze_crm_data_tool first.\n"
         "- update_erpnext_lead_tool: only passed fields change. Statuses: Lead, Open, Replied,\n"
