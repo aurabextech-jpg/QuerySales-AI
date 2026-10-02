@@ -13,12 +13,8 @@
  */
 
 import { NextResponse } from "next/server";
-import { AUTH_COOKIE, REFRESH_COOKIE, cookieOptions } from "@/lib/auth";
-import {
-  exchangeSessionForJwt,
-  extractSessionCookie,
-  signInWithPassword,
-} from "@/lib/neon-auth";
+import { extractSessionCookie, signInWithPassword } from "@/lib/neon-auth";
+import { authErrorMessage, startSession } from "@/lib/session-response";
 
 export async function POST(request: Request) {
   try {
@@ -33,15 +29,14 @@ export async function POST(request: Request) {
 
     const origin = new URL(request.url).origin;
 
-    // Step 1: Sign in
     const signInRes = await signInWithPassword(email, password, origin);
-    const signInData = await signInRes.json().catch(() => ({}));
+    const signInData: unknown = await signInRes.json().catch(() => ({}));
 
     if (signInRes.status >= 400) {
-      const message =
-        (signInData as Record<string, string>).message ??
-        "Invalid email or password.";
-      return NextResponse.json({ error: message }, { status: 401 });
+      return NextResponse.json(
+        { error: authErrorMessage(signInData, "Invalid email or password.") },
+        { status: 401 },
+      );
     }
 
     const sessionCookie = extractSessionCookie(signInRes);
@@ -52,25 +47,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Step 2: Exchange for a JWT
-    const jwt = await exchangeSessionForJwt(sessionCookie, origin);
-    if (!jwt) {
-      return NextResponse.json(
-        { error: "Failed to exchange the session for an access token." },
-        { status: 502 },
-      );
-    }
-
-    // Step 3: Store both cookies
-    const response = NextResponse.json({
-      success: true,
-      user: (signInData as Record<string, unknown>).user ?? { email },
-    });
-
-    response.cookies.set(AUTH_COOKIE, jwt, cookieOptions);
-    response.cookies.set(REFRESH_COOKIE, sessionCookie, cookieOptions);
-
-    return response;
+    const user = (signInData as { user?: unknown }).user ?? { email };
+    return startSession(sessionCookie, origin, user);
   } catch (err) {
     console.error("[auth/login] Unexpected error:", err);
     return NextResponse.json(

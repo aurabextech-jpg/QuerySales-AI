@@ -25,7 +25,9 @@ import {
 } from "@/lib/jwt";
 import { exchangeSessionForJwt } from "@/lib/neon-auth";
 
-const PUBLIC_PATHS = ["/login", "/api/auth"];
+const PUBLIC_PATHS = ["/login", "/signup", "/api/auth"];
+// Pages a signed-in user has no reason to see.
+const GUEST_ONLY_PATHS = ["/login", "/signup"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
@@ -94,7 +96,7 @@ export async function proxy(request: NextRequest) {
 
   // Public path (e.g. /login)
   if (isPublicPath(pathname)) {
-    if (authenticated && pathname === "/login") {
+    if (authenticated && GUEST_ONLY_PATHS.includes(pathname)) {
       return withRefreshedCookie(
         NextResponse.redirect(new URL("/dashboard", request.url)),
       );

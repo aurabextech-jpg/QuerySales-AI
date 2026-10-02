@@ -68,6 +68,26 @@ export async function exchangeSessionForJwt(
   }
 }
 
+/**
+ * Create an account. Better Auth signs the new user in on success (its
+ * `autoSignIn` default), so the response carries a session cookie just like
+ * sign-in does. Returns the raw response for the caller to read.
+ */
+export async function signUpWithPassword(
+  name: string,
+  email: string,
+  password: string,
+  origin: string,
+): Promise<Response> {
+  return fetch(`${NEON_AUTH_URL}/sign-up/email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(origin) },
+    body: JSON.stringify({ name, email, password }),
+    redirect: "manual",
+    cache: "no-store",
+  });
+}
+
 /** Sign in with email + password. Returns the raw response for the caller to read. */
 export async function signInWithPassword(
   email: string,

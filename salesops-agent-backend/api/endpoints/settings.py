@@ -10,6 +10,8 @@ import json
 import logging
 from typing import Optional
 
+import openai
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -20,6 +22,7 @@ from core.config import settings
 from core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from core.security import get_current_user
 from core.smtp import open_smtp
+from services.knowledge.embed import embed_texts
 from core.integrations import PROVIDERS, IntegrationSpec, get_spec
 from core.user_config import (
     ConfigurationMissing,
@@ -326,6 +329,18 @@ async def put_embedding_settings(
     )
 
 
+PROVIDER_MESSAGE_CHARS = 200
+
+
+def _provider_message(exc: openai.APIStatusError) -> str:
+    """The provider's own error sentence (e.g. "produces 1024-dimensional
+    embeddings"), which is what the user needs to fix their settings."""
+    body = exc.body if isinstance(exc.body, dict) else {}
+    error = body.get("error", body)
+    message = error.get("message") if isinstance(error, dict) else None
+    return str(message or exc.message)[:PROVIDER_MESSAGE_CHARS]
+
+
 @router.post("/embedding/test", response_model=TestResult)
 async def test_embedding_settings(
     user: User = Depends(get_current_user),
@@ -337,18 +352,17 @@ async def test_embedding_settings(
         return TestResult(success=False, message=exc.message)
 
     try:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
-        resp = await client.embeddings.create(
-            model=cfg.model,
-            input=["test"],
-        )
-        dim = len(resp.data[0].embedding)
-        return TestResult(
-            success=True,
-            message=f"Embedding returned {dim} dimensions.",
-        )
+        # The exact call indexing and search make (same `dimensions` argument,
+        # same 1536 check). The old test sent no `dimensions` and passed any
+        # size, so a 1024-dim model "passed" while every real call failed.
+        await embed_texts(["test"], cfg)
+        return TestResult(success=True, message="Embedding returned 1536 dimensions.")
+    except ValueError as exc:
+        return TestResult(success=False, message=str(exc))
+    except openai.APIStatusError as exc:
+        logger.warning("Embedding test failed for user %s: %s", user.id, exc)
+        detail = _provider_message(exc)
+        return TestResult(success=False, message=f"Provider returned HTTP {exc.status_code}: {detail}")
     except Exception as exc:
         logger.warning("Embedding test failed for user %s: %s", user.id, exc)
         return TestResult(success=False, message=f"Connection failed: {type(exc).__name__}")
