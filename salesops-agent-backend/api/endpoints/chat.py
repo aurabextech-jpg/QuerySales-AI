@@ -332,6 +332,12 @@ async def chat_stream(
         )
         await _save_message(db, run_id, "assistant", message)
         return {"run_id": run_id, "status": "completed", "steps": [], "message": message}
+    except openai.APITimeoutError:
+        logger.error("chat_stream LLM provider timed out (run=%s)", run_id)
+        raise HTTPException(
+            status_code=502,
+            detail="The agent stopped: your LLM provider did not respond in time. Try again.",
+        )
     except openai.APIStatusError as exc:
         # The user's own LLM provider refused the call. Say which kind of refusal
         # so they can act on it; the provider's body is logged, never returned.

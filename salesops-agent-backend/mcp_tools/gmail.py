@@ -10,6 +10,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
 
+from core.smtp import open_smtp
+
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +56,7 @@ async def send_email(
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.ehlo()
-            server.starttls()
+        with open_smtp(smtp_host, smtp_port, 30) as server:
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, to_email, msg.as_string())
 
@@ -70,7 +70,7 @@ async def send_email(
     except smtplib.SMTPAuthenticationError:
         return {
             "status": "error",
-            "message": "Gmail authentication failed — check GMAIL_USER and GMAIL_APP_PASSWORD",
+            "message": "Email sign-in was rejected — check the address and password in Settings -> Email",
         }
     except Exception as exc:
         logger.error("send_email error: %s", exc)

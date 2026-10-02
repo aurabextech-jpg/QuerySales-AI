@@ -19,6 +19,7 @@ from sqlalchemy.future import select
 from core.config import settings
 from core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from core.security import get_current_user
+from core.smtp import open_smtp
 from core.integrations import PROVIDERS, IntegrationSpec, get_spec
 from core.user_config import (
     ConfigurationMissing,
@@ -452,15 +453,13 @@ async def test_email_settings(
         return TestResult(success=False, message="Email not configured.")
 
     try:
-        import smtplib
-
         pw = (
             decrypt_secret(row.smtp_password_encrypted)
             if row.smtp_password_encrypted
             else None
         )
-        with smtplib.SMTP(row.smtp_host, row.smtp_port or 587, timeout=10) as smtp:
-            smtp.starttls()
+        # Same connection path as real sends, so a passing test means sending works.
+        with open_smtp(row.smtp_host, row.smtp_port, 10) as smtp:
             if pw:
                 smtp.login(row.email_address, pw)
         return TestResult(success=True, message="SMTP connection successful.")

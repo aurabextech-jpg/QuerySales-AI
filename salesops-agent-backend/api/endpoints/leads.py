@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.sales_agent import run_sales_agent
 from core.security import get_current_user
+from core.smtp import open_smtp
 from core.user_config import resolve_email_config, ConfigurationMissing
 from db.models import Lead, OutreachDraft, User, WorkflowRun
 from db.session import get_db
@@ -312,7 +313,6 @@ async def approve_outreach(
     try:
         email_cfg = await resolve_email_config(user.id, db)
         if email_cfg and email_cfg.smtp_host and email_cfg.smtp_password:
-            import smtplib
             from email.mime.text import MIMEText
 
             msg = MIMEText(draft.body)
@@ -327,10 +327,7 @@ async def approve_outreach(
 
             if to_email:
                 msg["To"] = to_email
-                with smtplib.SMTP(
-                    email_cfg.smtp_host, email_cfg.smtp_port or 587, timeout=10
-                ) as smtp:
-                    smtp.starttls()
+                with open_smtp(email_cfg.smtp_host, email_cfg.smtp_port, 10) as smtp:
                     smtp.login(email_cfg.email_address, email_cfg.smtp_password)
                     smtp.send_message(msg)
                 sent = True

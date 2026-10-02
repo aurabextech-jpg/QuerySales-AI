@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 # ── Limits ─────────────────────────────────────────────────────────────────
 FETCH_TIMEOUT = 10.0
+# httpx timeouts are per network operation, so a server that trickles bytes can
+# hold a fetch open indefinitely. These are hard wall-clock caps.
+FETCH_DEADLINE = 15.0
+COMPANY_DEADLINE = 40.0
 MAX_PAGE_BYTES = 600_000
 MAX_REDIRECTS = 4
 MAX_COMPANIES = 8
@@ -177,6 +181,13 @@ async def _assert_public(url: str) -> None:
 
 async def _fetch(client: httpx.AsyncClient, url: str) -> tuple[str, str, str | None]:
     """Return (final_url, html, error). Never raises — one dead site must not fail a batch."""
+    try:
+        return await asyncio.wait_for(_fetch_inner(client, url), FETCH_DEADLINE)
+    except asyncio.TimeoutError:
+        return url, "", "timed out"
+
+
+async def _fetch_inner(client: httpx.AsyncClient, url: str) -> tuple[str, str, str | None]:
     current = url
     try:
         for _ in range(MAX_REDIRECTS + 1):
@@ -580,7 +591,10 @@ async def _search(
 async def web_search(input_data: WebSearchInput, dork_creds: Any = None) -> dict[str, Any]:
     async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
-            results, engine = await _search(client, input_data.query, input_data.max_results, dork_creds)
+            results, engine = await asyncio.wait_for(
+                _search(client, input_data.query, input_data.max_results, dork_creds),
+                FETCH_DEADLINE,
+            )
         except Exception as exc:
             logger.warning("web_search failed: %s", type(exc).__name__)
             return {
@@ -762,10 +776,17 @@ async def research_companies(
 ) -> dict[str, Any]:
     companies = input_data.companies[:MAX_COMPANIES]
     gate = asyncio.Semaphore(CONCURRENCY)
+    async def bounded(company: CompanyRef) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(
+                _research_one(client, gate, company, input_data.city, dork_creds),
+                COMPANY_DEADLINE,
+            )
+        except asyncio.TimeoutError:
+            return {"name": company.name, "notes": ["research timed out"], "score": 0, "tier": "Low"}
+
     async with httpx.AsyncClient() as client:
-        profiles = await asyncio.gather(*(
-            _research_one(client, gate, c, input_data.city, dork_creds) for c in companies
-        ))
+        profiles = await asyncio.gather(*(bounded(c) for c in companies))
     profiles = sorted(profiles, key=lambda p: p.get("score", 0), reverse=True)
     result: dict[str, Any] = {
         "status": "success",

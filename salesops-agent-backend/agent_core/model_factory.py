@@ -10,13 +10,24 @@ from agents import AsyncOpenAI, OpenAIChatCompletionsModel
 
 from core.user_config import ResolvedLLMConfig
 
+LLM_TIMEOUT_SECONDS = 90.0
+LLM_MAX_RETRIES = 1
+
 
 def build_model(cfg: ResolvedLLMConfig) -> OpenAIChatCompletionsModel:
     """Build an OpenAI-compatible model from a resolved per-user config.
 
     Same shape as ``orchestrator.py:_make_model`` but instantiated per run.
     """
-    client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+    # The SDK default is a 600 s timeout with 2 retries, so one stalled provider
+    # call could freeze a chat for half an hour. 90 s fits a long tool-heavy
+    # completion; a stall now fails fast and chat.py reports it.
+    client = AsyncOpenAI(
+        api_key=cfg.api_key,
+        base_url=cfg.base_url,
+        timeout=LLM_TIMEOUT_SECONDS,
+        max_retries=LLM_MAX_RETRIES,
+    )
     return OpenAIChatCompletionsModel(
         model=cfg.model,
         openai_client=client,

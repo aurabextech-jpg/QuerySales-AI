@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from core.smtp import open_smtp
 from core.user_config import (
     ConfigurationMissing,
     ResolvedEmailConfig,
@@ -199,11 +200,20 @@ def _smtp_send(
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = f"{references} {in_reply_to}".strip()
     try:
-        with smtplib.SMTP_SSL(
-            cfg.smtp_host or "", cfg.smtp_port or 465, timeout=SEND_TIMEOUT_SECONDS
-        ) as smtp:
+        with open_smtp(cfg.smtp_host or "", cfg.smtp_port, SEND_TIMEOUT_SECONDS) as smtp:
             smtp.login(cfg.email_address, cfg.smtp_password or "")
             smtp.send_message(msg)
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.error("SMTP login rejected host=%s: %s", cfg.smtp_host, exc)
+        raise MailSendError(
+            f"{cfg.smtp_host} rejected your email sign-in. Check the address and "
+            "password in Settings → Email (Gmail needs an app password)."
+        ) from exc
+    except smtplib.SMTPRecipientsRefused as exc:
+        logger.error("SMTP recipient refused host=%s: %s", cfg.smtp_host, exc)
+        raise MailSendError(
+            f"Your email provider refused the recipient address {draft.to_addr}."
+        ) from exc
     except (smtplib.SMTPException, OSError) as exc:
         logger.error("SMTP send failed host=%s: %s", cfg.smtp_host, exc,
                      exc_info=True)
