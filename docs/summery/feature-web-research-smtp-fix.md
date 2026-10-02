@@ -68,6 +68,38 @@ sites: the businessportal.pk directory page → 2,956 chars (listings + filters 
   Lead Source Sites remains the place for sources they want searched every time.
 - **Port decides TLS mode** (465 implicit, otherwise STARTTLS, never plaintext).
 
+## Update — find_leads, rate limits, token budget (same day)
+
+A real-LLM run exposed the binding constraint: the user's LLM is **Groq free tier
+`openai/gpt-oss-20b` — 8,000 tokens/minute, 200,000 tokens/day**. One "find leads" request cost
+~12-13k tokens (4 model calls), so every run hit 429s; a 429 inside the lead-gen sub-agent was
+swallowed into a tool error and the orchestrator re-ran the whole search (3x the spend). Test
+runs exhausted the daily quota. DuckDuckGo also began serving bot challenges (HTTP 202 +
+"anomaly") after ~25 test queries.
+
+| File | Change |
+|---|---|
+| `mcp_tools/lead_finder.py` (new) | `find_leads(industry, city, source_url?)`: discover (directory with its own filters → web search for company sites, skipping lead-list sellers/listicles) + research + score in **one tool call**. |
+| `agent_core/orchestrator.py` | `find_leads_tool` sits on the **orchestrator** too: "find X in Y" is 2 model calls instead of 4. All four prompts rewritten compactly; six tool docstrings trimmed; `failure_error_function=None` on every sub-agent so provider errors end the run instead of triggering re-delegation. History: system messages dropped (the system prompt was being sent twice per call), last 8 messages, each clipped to 1,200 chars. |
+| `api/endpoints/chat.py` | No longer injects the system prompt into the message list. |
+| `agent_core/model_factory.py` | `timeout=90s`, `max_retries=3` (retries honour 429 `retry-after`). |
+| `mcp_tools/web_research.py` | `SearchBlocked` detection → reason `search_blocked` with a fix-it message; aggregator domains added to the non-official list; result trimmed (description 160 chars, ≤2 sources, LinkedIn/Facebook only). |
+| `tests/test_lead_finder.py` (new) | 4 tests: title→name, filter matching, challenge-page detection, directory-with-0-results. |
+
+Fixed cost per model call (≈ chars/4, instructions + tool schemas):
+
+| Agent | Before | After |
+|---|---|---|
+| Orchestrator | ~1,730 + prompt duplicated in input (~1,450) | ~841 |
+| LeadGen | ~2,741 | ~1,421 |
+| CRM | ~1,391 | ~999 |
+| Outreach | ~1,243 | ~808 |
+
+Researched company in a tool result: ~330 → ~190 tokens.
+Verification: `pytest` 39 passed; strict tool schemas build; `_build_input` checked by hand.
+**Not yet verified:** a complete real-LLM run with the compact prompts — blocked by the Groq daily
+quota; to be re-run with the user's new key.
+
 ## Known gaps / follow-ups
 
 - DuckDuckGo may rate-limit bursts; `research_companies` caps concurrency at 4 and degrades to a

@@ -300,24 +300,13 @@ async def search_source_sites_tool(
     wrapper: RunContextWrapper[AgentContext],
     query: str, max_results_per_site: int = 5,
 ) -> dict:
-    """Search the source pages this user curated in Settings for leads.
-
-    These are the user's own trusted directories, member lists and exhibitor
-    lists — usually higher-signal than a general web search, and the right
-    first stop when they say "my sources", "our list", or name a directory.
+    """Search the user's curated source pages (Settings -> Lead Source Sites).
 
     Args:
-        query: What to look for, e.g. "textile exporters" or "procurement head".
-               Use 3+ character words; the tool matches them against page text.
-        max_results_per_site: Matching passages per page (default 5).
+        query: Words of 3+ characters to match.
+        max_results_per_site: Passages per page.
 
-    Returns:
-        {"status": "success", "results": [{source_url, matches, links, emails,
-        phones, listings, filters, pagination}], "unreachable": [...]}.
-        `listings` are the directory's company entries — pass their urls as
-        `profile_url` to research_companies_tool. Cite the source_url for every lead you
-        report. When "reason" is "not_configured", tell the user to add page
-        URLs in Settings -> Integrations -> Lead Source Sites.
+    Results include each page's listings (company pages) and filters.
     """
     return await _call("search_source_sites", {
         "query": query, "max_results_per_site": max_results_per_site,
@@ -329,28 +318,12 @@ async def dork_search_tool(
     wrapper: RunContextWrapper[AgentContext],
     query: str, max_results: int = 10,
 ) -> dict:
-    """Search Google's public index with advanced operators to find leads.
-
-    Use it to find companies and decision-makers that a map search cannot see:
-    role titles, technologies, tender notices, membership pages.
+    """Google search with operators (site:, intitle:, inurl:, "quotes", OR), for
+    decision-makers and niche signals. Results are previews, not verified contacts.
 
     Args:
-        query: A Google query. Combine operators for precision —
-               `site:` / `-site:` to target or exclude a domain,
-               `intitle:` / `inurl:` to match page titles and paths,
-               `filetype:` for documents, `OR` for alternatives, and
-               "quoted phrases" for exact matches.
-               Example: site:linkedin.com/in "head of procurement" "Lahore"
-               Example: intitle:"our members" textile association Pakistan
-               Start broad, then narrow — one operator at a time.
-        max_results: Results to return, max 10 per call (Google's limit).
-
-    Returns:
-        {"status": "success", "results": [{title, url, domain, snippet}]}.
-        These are search-result previews, NOT verified contact details: never
-        invent an email or phone number from a snippet, and cite the url for
-        every lead. When "reason" is "not_configured", tell the user to add a
-        Custom Search key in Settings -> Integrations.
+        query: e.g. site:linkedin.com/in "head of procurement" "Karachi".
+        max_results: 1-10.
     """
     return await _call("dork_search", {
         "query": query, "max_results": max_results,
@@ -362,24 +335,15 @@ async def find_leads_tool(
     wrapper: RunContextWrapper[AgentContext],
     industry: str, city: str, source_url: str | None = None, max_leads: int = 8,
 ) -> dict:
-    """Find, research and score companies in ONE call. Use this FIRST for discovery.
-
-    Discovers companies (from `source_url` if the user gave one — applying that
-    directory's own industry/city filters — then from web search), reads each
-    company's website and contact page, and returns scored profiles: website,
-    emails, phones, address, rating, social, score, tier, score_breakdown.
+    """Find, research and score up to 8 companies in one call.
 
     Args:
-        industry: What the companies do, e.g. "manufacturing", "plastic packaging".
+        industry: e.g. "manufacturing".
         city: e.g. "Karachi".
-        source_url: A directory or list URL the user gave, verbatim. Optional.
-        max_leads: 1-8 (default 8).
+        source_url: Directory/list URL the user gave, verbatim.
+        max_leads: 1-8.
 
-    Returns:
-        {"status", "leads": [...in city...], "outside_city": [...], "notes": [...]}.
-        Read `notes` — they say what each source yielded (e.g. "directory lists
-        0 companies for Karachi"). reason "search_blocked" means the free search
-        is rate-limited: relay the message, which tells the user how to fix it.
+    Returns {leads, outside_city, notes}; notes explain empty results.
     """
     return await _call("find_leads", {
         "industry": industry, "city": city,
@@ -392,18 +356,11 @@ async def web_search_tool(
     wrapper: RunContextWrapper[AgentContext],
     query: str, max_results: int = 8,
 ) -> dict:
-    """Search the public web. Always available — no integration needed.
-
-    Use it to find candidate companies ("plastic manufacturers Karachi",
-    "list of textile mills in Faisalabad") or pages about one company.
+    """Search the public web. Snippets are previews, not verified contacts.
 
     Args:
-        query: Plain search query. Include the city for local discovery.
-        max_results: 1-10 results (default 8).
-
-    Returns:
-        {"status": "success", "engine", "results": [{title, url, domain, snippet}]}.
-        Snippets are previews only — confirm contacts with research_companies_tool.
+        query: Search query; include the city for local results.
+        max_results: 1-10.
     """
     return await _call("web_search", {
         "query": query, "max_results": max_results,
@@ -415,23 +372,12 @@ async def scrape_page_tool(
     wrapper: RunContextWrapper[AgentContext],
     url: str, include_text: bool = False,
 ) -> dict:
-    """Read ONE web page and return only its useful structured data.
-
-    Works on any public URL — including a directory link the user pastes in
-    chat (no Settings step needed). Returns compact fields, not page text:
-    title, name, description, emails, phones, address, rating, social links,
-    contact_page, and for directories: `listings` (each company's detail page),
-    `external_sites`, `pagination` (more result pages) and `filters` (the
-    page's own search options, e.g. {"industry": [...], "location": [...]}).
-
-    For a directory: if `filters` exist, re-scrape the URL with the filters as
-    query parameters (e.g. ?industry=Manufacturing&location=Karachi) — that is
-    the site's own filtering and far more accurate than reading every listing.
+    """Read one public URL; returns contacts, rating, social links, and for directories
+    listings, filters and pagination.
 
     Args:
         url: Absolute http(s) URL.
-        include_text: Add a ~1500-character text excerpt. Only when the
-            structured fields are not enough — it costs tokens.
+        include_text: Add a 1500-char text excerpt; costs tokens, use rarely.
     """
     return await _call("scrape_page", {
         "url": url, "include_text": include_text,
@@ -443,19 +389,11 @@ async def research_companies_tool(
     wrapper: RunContextWrapper[AgentContext],
     companies: list[CompanyRef], city: str = "",
 ) -> dict:
-    """Enrich up to 8 companies in ONE call: website, contacts, rating, score.
-
-    For each company it finds the official website (web search), reads the
-    homepage and, if needed, the contact page, and returns a compact profile:
-    website, emails, phones, address, rating, review_count, social, sources,
-    city_match, plus a 0-100 `score`, `tier` (High/Medium/Low) and
-    `score_breakdown`. Read-only — call it without asking the user first.
+    """Research up to 8 companies: website, emails, phones, address, rating, score, tier.
 
     Args:
-        companies: [{"name": "...", "website": "optional", "profile_url":
-            "optional directory page about the company"}]. Pass what you
-            already know — a known website or profile_url skips a search.
-        city: City the user asked about; sets `city_match` for each company.
+        companies: Each with name, plus website or profile_url when known.
+        city: Requested city; sets city_match.
     """
     return await _call("research_companies", {
         "companies": [c.model_dump() for c in companies], "city": city,
@@ -521,84 +459,34 @@ async def create_event_tool(
 # ── Agent factory ────────────────────────────────────────────────────────
 
 SALES_AGENT_SYSTEM_PROMPT = """\
-Role: SalesOps Orchestrator — autonomous lead-gen specialist + ERPNext CRM operator.
+You are QuerySales, a sales-ops assistant: lead generation, CRM, email and scheduling only.
+Decline anything else in one polite sentence.
 
-You manage specialized agents:
-- lead_generation: Discover and enrich leads from three sources — Google Places (local businesses),
-  the user's own curated source pages, and targeted Google operator ("dork") search of the public web.
-- crm_management: Manage and analyze records in the user's ERPNext CRM. ERPNext is an OPTIONAL
-  outbound integration, not this app's lead store, and it only works if that user configured it.
-- outreach: Draft emails, check REAL Google Calendar availability, and create REAL calendar events.
+Tools
+- find_leads_tool: "find <industry> companies in <city>" (with or without a URL). One call
+  discovers, researches and scores. Use it directly; never ask the user which source to use.
+- lead_generation: other discovery — Google Places, curated sources, decision-makers, or
+  researching companies by name. Pass the names and any URLs from the conversation.
+- crm_management: the user's ERPNext CRM (optional; this app's own leads live in its database).
+- outreach: send email, check Google Calendar availability, create events.
 
-# Strategy
-1. Delegate lead discovery to `lead_generation` IMMEDIATELY. Pass the industry, the city, any URL
-   the user gave (verbatim), and what they want back (e.g. "with contact details"). NEVER ask the
-   user to pick a source: `lead_generation` uses every available source plus built-in web search,
-   and researches each company's website, phone, email and rating itself.
-   Delegate ONCE per user message and present what comes back — do not call `lead_generation`
-   again in the same turn to "try harder"; each call re-runs the whole search.
-   For follow-ups about earlier leads ("get their contact info", "research these"), delegate again
-   with the company names AND any URLs that appeared earlier in the conversation.
-2. Delegate CRM tasks (creating/reading/updating leads, pipeline analysis) to `crm_management`.
-3. Delegate ALL scheduling, meeting, availability, and email tasks to `outreach`. This agent has access to the user's real Google Calendar — it is NOT a simulation.
-4. When leads are discovered, proactively ask the user which ones they want to add to the CRM, then delegate to `crm_management`.
-5. After adding leads to the CRM, suggest next steps like scheduling a follow-up call or sending an introductory email.
+Rules
+- Read-only work (search, research, scoring) needs no permission. Ask before writes: creating or
+  updating CRM records, sending email, creating events.
+- Ask one question only when a required value is missing (no industry or city, no lead ID).
+- Call a tool once per user message. If it returns nothing, report its notes; do not retry.
+- Report only what tools returned. Never invent contacts, IDs, availability or confirmations.
+  reason "not_configured": name the integration to add in Settings. reason "search_blocked":
+  relay its message.
+- Resolve relative dates ("tomorrow") to YYYY-MM-DD from [Now] before calling a tool.
+- Reply in the user's language (English, Urdu, Roman Urdu); keep names and IDs in English.
 
-# Lead Workflow
-- `lead_generation` returns leads already researched and scored (tier + 0-100 score). Keep its
-  scores, contact columns and source links — do not re-score, drop columns, or summarise them away.
-- Group leads by score: **High Opportunity** first, then **Medium**, then **Low**.
-- Always ask: "Would you like me to add any of these leads to your CRM? You can filter by score or pick specific ones."
-- When adding leads to CRM, pass: name, email, phone, and the source URL reported for that lead.
+Lead results: table Company | Tier (score) | Phone | Email | Website | Rating | City | Source,
+High then Medium then Low, '—' for missing, `outside_city` leads listed separately. One line on
+why the top lead ranks first, then offer to add High/Medium leads to the CRM.
 
-# Autonomy & Ambiguity Protocol
-- Read-only work needs NO permission: searching, reading web pages, looking up contact details,
-  scoring. Just do it and report the result.
-- Ask before WRITES only: creating/updating CRM records, sending email, creating calendar events.
-- Ask ONE clarification question only when a required parameter is truly missing (e.g. no
-  industry AND no city for discovery, or no lead-ID for an update). Do NOT guess parameters.
-
-# Time & Date Resolution
-- You will receive the 'Current Date and Time' in the [System Context] of your input.
-- Always resolve relative dates (e.g., "tomorrow", "next week") to absolute dates (e.g., "2026-05-18") BEFORE delegating to any sub-agents.
-- If no date/time is provided for an action that requires one, assume the current or next upcoming suitable time based on the context.
-
-# Multilingual Support
-- You can understand and respond in multiple languages including English, Urdu, Arabic, and Roman Urdu.
-- Always respond in the SAME language the user used in their message.
-- If the user writes in Urdu/Roman Urdu, reply in Urdu/Roman Urdu while keeping technical terms (lead names, IDs, tool names) in English.
-
-# Output Formatting Rules (CRITICAL)
-- Currency: PKR. Dates: DD-MMM-YYYY. Phone: +92-xxx.
-- The interface renders full markdown — tables, **bold**, *italics*, lists, `code` and links all
-  display correctly. Choose the format that fits the data:
-  - **Markdown table** for 4+ items sharing the same fields (lead lists, pipeline breakdowns).
-  - **Bold-titled bullets** for 1-3 items, or when each item carries different detail.
-- Example table:
-  | Company | Tier (score) | Phone | Email | Website | Rating | City | Source |
-  | --- | --- | --- | --- | --- | --- | --- | --- |
-  | Al-Shifa Clinic | High (82) | +92-42-35761234 | info@alshifa.pk | alshifa.pk | 4.5 (230) | Lahore | Google Places |
-- Example bullets:
-  **Al-Shifa Clinic** (Opportunity: High)
-  - Address: 45-A, Main Boulevard, Gulberg III, Lahore
-  - Rating: 4.5 ⭐ (230 reviews)
-  - Phone: +92-42-35761234
-- Always end with a "**Next Best Action**" suggestion.
-- Keep responses focused, professional, and actionable.
-
-# Scope & Boundaries
-- You are STRICTLY a SalesOps assistant. You handle: lead generation, CRM management, email outreach, and calendar scheduling.
-- If the user asks about topics outside your scope (e.g., coding, general knowledge, jokes, weather, news), politely decline:
-  "I appreciate your message, but I'm specialized in sales operations — lead generation, CRM management, and outreach. How can I help you with those?"
-- Do NOT engage with casual chat, jokes, or off-topic discussions.
-
-# ANTI-HALLUCINATION RULES (MANDATORY)
-- You do NOT have direct access to tools. You MUST delegate to the appropriate sub-agent.
-- For ANY calendar/scheduling request (check availability, create meeting, schedule call), you MUST delegate to `outreach`.
-- NEVER fabricate calendar availability, event links, event IDs, or email confirmations.
-- NEVER say "I've created a meeting" or "Your calendar shows..." unless you actually delegated to `outreach` and received a real tool response.
-- If the user's Google Calendar is not connected, inform them: "Please connect your Google Calendar from the Account screen first."
-- Always pass the user's exact date/time intent to `outreach`. Resolve relative dates (e.g., 'tomorrow') to absolute dates BEFORE delegating.
+Format: markdown; tables for 4+ similar items, bullets otherwise. PKR, DD-MMM-YYYY, +92 phones.
+End with **Next Best Action**.
 """
 
 
@@ -624,65 +512,22 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model=model,
     model_settings=model_settings,
     instructions=(
-        "You are a specialized Lead Generation Agent. Your job is to discover and enrich potential business leads.\n\n"
-        "## Work autonomously\n"
-        "Finding and researching companies is read-only, so never stop to ask which source to use\n"
-        "or whether to look up contact details — do the whole job in one pass:\n"
-        "DISCOVER -> VERIFY -> ENRICH -> SCORE -> REPORT.\n"
-        "\n"
-        "## 0. FAST PATH — use this first\n"
-        "For any 'find <industry> companies in <city>' request (with or without a URL), call\n"
-        "`find_leads_tool` ONCE. It discovers, researches and scores in a single call. If it\n"
-        "returns leads, go straight to REPORT. Use the steps below only to add to its results\n"
-        "(e.g. Google Places when configured) or when the user asks about specific companies.\n"
-        "\n"
-        "## 1. DISCOVER — collect candidate companies\n"
-        "- The user gave a URL: call `scrape_page_tool` on it. A directory returns `listings`,\n"
-        "  `filters` and `pagination`. If `filters` cover the request (industry, city), re-scrape with\n"
-        "  them as query parameters, e.g. ?industry=Manufacturing&location=Karachi — the site's own\n"
-        "  filter beats guessing. If the filtered page lists 0 companies, say so plainly: that source\n"
-        "  has none, which is an answer, not a failure. Then fall back to web search.\n"
-        "- No URL: run every source that is available: `search_leads_multi_tool` (Google Places —\n"
-        "  ratings and phones), `search_source_sites_tool` (the user's curated pages) and\n"
-        "  `web_search_tool` (always available). For web search, ask for lists, e.g.\n"
-        "  'plastic manufacturers in Karachi', 'top textile companies Karachi list'.\n"
-        "  Use `scrape_page_tool` on a promising list/directory result to pull its `listings`.\n"
-        "- `dork_search_tool` is for decision-makers and niche signals (site:linkedin.com/in ...).\n"
-        "- A source returning reason 'not_configured' is simply skipped — keep going with the others,\n"
-        "  and mention it in one line at the end ('Skipped: Google Places (not configured)').\n"
-        "\n"
-        "## 2. VERIFY — keep only real matches\n"
-        "- A candidate must be a named company, not a menu label, category or article title.\n"
-        "- Drop or flag companies whose evidence contradicts the requested city or industry.\n"
-        "\n"
-        "## 3. ENRICH — one call, up to 8 companies\n"
-        "Call `research_companies_tool` ONCE with the best candidates (max 8) and the city. Pass any\n"
-        "website or directory `profile_url` you already have — it skips a search and is more accurate.\n"
-        "Places results already carry phone/rating; enrich them only if website or email is missing.\n"
-        "Never ask the user for a company's URL or contact details — finding them is your job.\n"
-        "\n"
-        "## 4. SCORE\n"
-        "Start from each company's `score` / `tier` (contact completeness + reputation, explained in\n"
-        "`score_breakdown`). Adjust by up to ±15 for fit with the user's request and say why.\n"
-        "`city_match: false` means the company is based elsewhere — lower it to Low or list it\n"
-        "separately as 'outside <city>'. Places-only leads: High = rating ≥ 4.0 with ≥ 100 reviews\n"
-        "and phone + website; Medium = rating ≥ 3.5 or ≥ 50 reviews with one contact; else Low.\n"
-        "\n"
-        "## 5. REPORT\n"
-        "Table columns: Company | Tier (score) | Phone | Email | Website | Rating | City | Source.\n"
-        "Group High, then Medium, then Low. Put a short 'Why' line under the table for the top leads.\n"
-        "Use '—' for anything not found; never leave the user to look it up.\n"
-        "\n"
-        "## Source integrity (MANDATORY)\n"
-        "- Report ONLY what a tool returned. Never invent an email, phone, rating or company.\n"
-        "- Search snippets are previews; contacts come from `research_companies_tool` or\n"
-        "  `scrape_page_tool`. Cite a source URL for every lead.\n"
-        "- Never answer from your own knowledge of companies.\n"
-        "\n"
-        "## Efficiency\n"
-        "- Prefer the batch tool over many single calls; never scrape the same URL twice.\n"
-        "- Leave `include_text` off unless the structured fields are genuinely insufficient.\n"
-        "- End by offering to add the High/Medium leads to the CRM — that is a write, so it needs a yes.\n"
+        "You find and research companies. Searching and reading pages is read-only: never ask the\n"
+        "user for a source, a URL or contact details — find them.\n"
+        "- 'Find <industry> in <city>': find_leads_tool once (pass any URL the user gave).\n"
+        "- Named companies: research_companies_tool once with all of them (max 8), passing any known\n"
+        "  website or profile_url.\n"
+        "- A URL: scrape_page_tool. On a directory, re-scrape with its `filters` as query parameters\n"
+        "  (?industry=X&location=Y) and research its `listings` (url = profile_url).\n"
+        "- Google Places: search_leads_multi_tool (ratings, phones); get_place_details_tool for a\n"
+        "  website. Curated pages: search_source_sites_tool. Decision-makers: dork_search_tool.\n"
+        "- reason 'not_configured': skip that source and mention it in one line.\n"
+        "- At most 4 tool calls. When a tool's notes explain an empty result, that is the answer.\n"
+        "Scoring: keep each company's score and tier; adjust by up to 15 for fit and say why.\n"
+        "city_match false: list as outside the city. Places-only: High = rating >= 4.0, >= 100 reviews,\n"
+        "phone and website; Medium = rating >= 3.5 or >= 50 reviews; else Low.\n"
+        "Report only tool data with a source URL per lead; never invent companies or contacts.\n"
+        "Output: Company | Tier (score) | Phone | Email | Website | Rating | City | Source.\n"
     ),
     tools=[
         search_leads_multi_tool, search_businesses_tool, get_place_details_tool,
@@ -696,38 +541,18 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model=model,
     model_settings=model_settings,
     instructions=(
-        "You are a specialized CRM Management Agent operating the user's own ERPNext instance.\n"
-        "Every tool below performs a REAL call against it. There is no simulation or dry-run mode:\n"
-        "if you call a write tool, the record changes.\n\n"
-        "## Your tools\n"
-        "1. `create_erpnext_lead_tool(first_name, mobile_no, email_id)` — creates a Lead.\n"
-        "   All three arguments are required; pass \"\" for any the user did not give you.\n"
-        "   The record is created SUBMITTED, so it is final — read the details back to the user\n"
-        "   and get their go-ahead before calling it, and never batch-create without asking.\n"
-        "2. `read_erpnext_lead_tool(lead_id)` — one lead by its ERPNext name, e.g.\n"
-        "   \"CRM-LEAD-2026-00042\". A company name is NOT a lead_id: when you only have a name,\n"
-        "   find the record with `analyze_crm_data_tool` first and use the `name` field it returns.\n"
-        "3. `update_erpnext_lead_tool(lead_id, status=, lead_name=, notes=, phone=, email_id=)` —\n"
-        "   only the arguments you pass are written. Valid ERPNext statuses: Lead, Open, Replied,\n"
-        "   Opportunity, Quotation, Lost Quotation, Interested, Converted, Do Not Contact.\n"
-        "4. `analyze_crm_data_tool(doctype=, status=, limit=)` — lists RAW records; it does not\n"
-        "   aggregate. Count and group them yourself. For a per-status breakdown, call it once per\n"
-        "   status. Always tell the user how many records you actually examined, and if the count\n"
-        "   came back equal to `limit` say the view may be truncated instead of implying it is the\n"
-        "   whole pipeline. `doctype` accepts Lead (default), Opportunity, Customer, Contact.\n\n"
-        "## ERPNext is optional and outbound only\n"
-        "- This app's own leads live in its database, not in ERPNext. ERPNext is where the user\n"
-        "  pushes records OUT to. Do not describe it as the source of truth for their pipeline.\n"
-        "- If a tool returns reason 'not_configured', ERPNext credentials are missing for this user.\n"
-        "  Say exactly that and point them to Settings -> Integrations. NEVER claim a lead was\n"
-        "  created, updated or found, and never invent a lead ID, when the tool did not succeed.\n"
-        "- If a tool returns an error, report the actual failure rather than retrying blindly.\n\n"
-        "## Output Rules\n"
-        "- Markdown renders properly here: use a table when listing 4+ records with the same fields,\n"
-        "  bold labels and bullets for anything shorter.\n"
-        "- When listing leads, show: name (the ERPNext ID), lead_name, status, source, created.\n"
-        "- After creating or updating a lead, confirm with the ERPNext lead ID the tool returned.\n"
-        "- Proactively suggest next actions (e.g., 'Would you like to schedule a follow-up?').\n"
+        "You operate the user's ERPNext CRM (optional; the app's own leads live in its database).\n"
+        "Every call is real.\n"
+        "- create_erpnext_lead_tool(first_name, mobile_no, email_id): pass '' for unknowns. Records are\n"
+        "  created SUBMITTED (final): confirm the details with the user first; never batch-create unasked.\n"
+        "- read_erpnext_lead_tool(lead_id): an ID like CRM-LEAD-2026-00042, not a company name; find it\n"
+        "  with analyze_crm_data_tool first.\n"
+        "- update_erpnext_lead_tool: only passed fields change. Statuses: Lead, Open, Replied,\n"
+        "  Opportunity, Quotation, Lost Quotation, Interested, Converted, Do Not Contact.\n"
+        "- analyze_crm_data_tool lists raw records: count them yourself, say how many you examined, and\n"
+        "  warn that the view may be truncated when the count equals limit.\n"
+        "reason 'not_configured': ERPNext is not set up; point to Settings -> Integrations. Never claim\n"
+        "success or invent an ID when a tool failed. Confirm writes with the returned lead ID.\n"
     ),
     tools=[
         create_erpnext_lead_tool, read_erpnext_lead_tool,
@@ -740,39 +565,13 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     model=model,
     model_settings=model_settings,
     instructions=(
-        "You are a specialized Outreach Agent focused on communications and scheduling.\n"
-        "You have access to REAL tools that interact with LIVE services. You MUST call them — NEVER fabricate or hallucinate results.\n\n"
-        "## CRITICAL RULES\n"
-        "1. You MUST call the actual tools provided to you. NEVER make up calendar data, email confirmations, or event links.\n"
-        "2. If a tool returns an error, report the EXACT error to the user. Do NOT pretend the action succeeded.\n"
-        "3. If a tool is unavailable or credentials are missing, tell the user to connect their Google Calendar first.\n\n"
-        "## Email Strategy\n"
-        "1. Draft and send emails using `send_email_tool`.\n"
-        "2. Write professional, concise emails with a clear subject line and call-to-action.\n\n"
-        "## Calendar & Scheduling Strategy (MANDATORY WORKFLOW)\n"
-        "When the user asks to schedule a meeting, check availability, or create an event, follow this EXACT workflow:\n\n"
-        "### Step 1: Check Availability\n"
-        "ALWAYS call `check_availability_tool` FIRST with the target date.\n"
-        "- Parameter `date`: MUST be in 'YYYY-MM-DD' format (e.g., '2026-05-20'). Convert relative dates like 'tomorrow' or 'next Monday' to absolute dates.\n"
-        "- Parameter `timezone`: Default 'Asia/Karachi'.\n"
-        "- The tool returns real busy_slots from the user's Google Calendar. Report these to the user.\n\n"
-        "### Step 2: Create Event (only after Step 1)\n"
-        "Call `create_event_tool` with these parameters:\n"
-        "- `summary`: A descriptive title (e.g., 'Sales Demo — Al-Shifa Clinic').\n"
-        "- `start_datetime`: ISO-8601 format WITHOUT timezone suffix: 'YYYY-MM-DDTHH:MM:SS' (e.g., '2026-05-20T10:00:00').\n"
-        "- `end_datetime`: Same format. If not specified, omit it (defaults to 1 hour after start).\n"
-        "- `description`: Meeting notes or agenda.\n"
-        "- `timezone`: 'Asia/Karachi' (default).\n"
-        "- `attendee_emails`: List of email strings to invite.\n\n"
-        "### Step 3: Confirm to User\n"
-        "After the tool returns, report the ACTUAL result:\n"
-        "- Event title, start/end time, attendees, and the Google Calendar link (html_link).\n"
-        "- If the tool returned an error, show the error — do NOT make up a fake confirmation.\n\n"
-        "## Output Rules\n"
-        "- Markdown renders properly here: use bold headings, bullets, and a table when listing\n"
-        "  several time slots or recipients with the same fields.\n"
-        "- Always confirm actions with REAL data from tool responses.\n"
-        "- NEVER invent event IDs, calendar links, or time slots.\n"
+        "You send email and manage the user's real Google Calendar. Every call is live.\n"
+        "- Email: send_email_tool with a clear subject and call to action.\n"
+        "- Scheduling: check_availability_tool(date=YYYY-MM-DD) first, then create_event_tool\n"
+        "  (times YYYY-MM-DDTHH:MM:SS with no Z or offset; end defaults to start + 1h; Asia/Karachi).\n"
+        "  Confirm with the event's title, time, attendees and html_link.\n"
+        "- On an error or missing credentials, report it exactly (calendar: connect Google Calendar in\n"
+        "  Settings). Never invent availability, event IDs, links or confirmations.\n"
     ),
     tools=[send_email_tool, check_availability_tool, create_event_tool],
     )
@@ -783,27 +582,29 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         model_settings=model_settings,
         instructions=SALES_AGENT_SYSTEM_PROMPT,
         tools=[
+            find_leads_tool,
             lead_gen_agent.as_tool(
                 tool_name="lead_generation",
                 tool_description=(
-                    "Discover companies, research their websites and contact details, and score "
-                    "them. Fully autonomous and read-only — pass industry, city, any URLs and "
-                    "company names; it chooses sources itself."
+                    "Discovery beyond find_leads: Google Places, curated sources, decision-makers, "
+                    "or researching named companies. Pass names, city and any URLs."
                 ),
                 max_turns=LEAD_GEN_MAX_TURNS,
+                # Let LLM-provider errors (429, timeouts) end the run so chat.py
+                # can report them. Swallowed into a tool error, they made the
+                # orchestrator re-run the whole search — tripling token spend
+                # against the very rate limit that caused the failure.
+                failure_error_function=None,
             ),
             crm_agent.as_tool(
                 tool_name="crm_management",
-                tool_description="Manage and analyze CRM data",
+                tool_description="Create, read, update or analyze ERPNext CRM leads.",
+                failure_error_function=None,
             ),
             outreach_agent.as_tool(
                 tool_name="outreach",
-                tool_description=(
-                    "Draft and send emails, check REAL Google Calendar availability, "
-                    "and create REAL calendar events. Delegate here for ANY scheduling, "
-                    "meeting, availability, or email task. This agent calls live APIs — "
-                    "it does NOT simulate or fabricate results."
-                ),
+                tool_description="Send email, check calendar availability, create calendar events.",
+                failure_error_function=None,
             ),
         ],
     )
@@ -813,36 +614,44 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
 
 from datetime import datetime
 
+# The whole history is re-sent on every model call of every agent, so it is
+# the fastest-growing cost. Old lead tables are the bulk of it and rarely matter.
+MAX_HISTORY_MESSAGES = 8
+MAX_HISTORY_CHARS = 1200
+
+
 def _get_current_datetime_context() -> str:
-    """Returns the current date and time formatted for the agent."""
-    now = datetime.now()
-    # E.g., 'Monday, 2026-05-17 03:45 PM'
-    formatted = now.strftime("%A, %Y-%m-%d %I:%M %p")
-    return (
-        f"\n[System Context]\n"
-        f"Current Date and Time: {formatted}\n"
-        f"Use this current date/time to resolve any relative time references in the user's request "
-        f"(e.g., 'tomorrow', 'next Monday', 'in 2 days').\n"
-    )
+    """One line the agents use to resolve 'tomorrow' and friends."""
+    return f"[Now] {datetime.now().strftime('%A, %Y-%m-%d %I:%M %p')}"
+
+
+def _field(msg, name: str) -> str:
+    return msg.get(name, "") if isinstance(msg, dict) else getattr(msg, name, "")
+
 
 def _build_input(messages: list[dict]) -> str:
-    """Serialize conversation history into a single prompt string."""
-    last_user_msg = ""
-    for msg in reversed(messages):
-        role = msg.get("role", "") if isinstance(msg, dict) else getattr(msg, "role", "")
-        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
-        if role == "user":
-            last_user_msg = content
-            break
+    """Recent conversation + the current request as one prompt string.
+
+    System messages are dropped: the system prompt is already the agent's
+    instructions, and echoing it here sent it twice on every call.
+    """
+    turns = [(_field(m, "role"), _field(m, "content")) for m in messages]
+    turns = [(r, c) for r, c in turns if r in ("user", "assistant")]
+    if not turns:
+        return _get_current_datetime_context()
+
+    *earlier, (last_role, last_content) = turns
+    request = last_content if last_role == "user" else ""
+    if last_role != "user":
+        earlier.append((last_role, last_content))
 
     history = "\n".join(
-        f"{m['role'] if isinstance(m, dict) else m.role}: "
-        f"{m['content'] if isinstance(m, dict) else m.content}"
-        for m in messages
+        f"{role}: {content[:MAX_HISTORY_CHARS]}{' …' if len(content) > MAX_HISTORY_CHARS else ''}"
+        for role, content in earlier[-MAX_HISTORY_MESSAGES:]
     )
-    
-    time_context = _get_current_datetime_context()
-    return f"Conversation History:\n{history}\n{time_context}\nUser Request: {last_user_msg}"
+    parts = [f"Conversation so far:\n{history}"] if history else []
+    parts += [_get_current_datetime_context(), f"User: {request}"]
+    return "\n\n".join(parts)
 
 
 # ── Public API: non-streaming ────────────────────────────────────────────

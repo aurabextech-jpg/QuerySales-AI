@@ -47,7 +47,8 @@ MAX_COMPANIES = 8
 # Parallel fetches per call — enough to finish 8 companies inside one serverless
 # request without hammering any single site.
 CONCURRENCY = 4
-DESCRIPTION_CHARS = 300
+# A one-line pitch is enough to judge fit; the full blurb cost ~75 tokens per company.
+DESCRIPTION_CHARS = 160
 SNIPPET_CHARS = 220
 MAX_LISTINGS = 30
 MAX_EXTERNAL = 15
@@ -64,6 +65,8 @@ SCORE_WEIGHTS = {
     "social": 5,
     "description": 5,
 }
+# Networks a B2B seller acts on, in order; at most this many are returned.
+PREFERRED_SOCIAL = ("linkedin", "facebook")
 HIGH_TIER = 70
 MEDIUM_TIER = 40
 
@@ -785,12 +788,17 @@ async def _research_one(
                 break
     if city and profile.get("address"):
         profile["city_match"] = city.lower() in profile["address"].lower()
-    other = [r["url"] for r in search_results if _is_non_official(r["url"])][:3]
+    other = [r["url"] for r in search_results if _is_non_official(r["url"])][:2]
     if other:
         profile["other_listings"] = other
 
     score, breakdown, tier = _score(profile)
     profile.update({"score": score, "tier": tier, "score_breakdown": breakdown})
+    # Scoring used everything found; the agent only needs enough to cite and act.
+    profile["sources"] = profile["sources"][:2]
+    profile["social"] = {
+        k: profile["social"][k] for k in PREFERRED_SOCIAL if k in profile["social"]
+    }
     return _public(profile)
 
 

@@ -437,6 +437,30 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   Note `outreach_sent` counts `OutreachDraft.status == "sent"` and `active_runs` counts
   `WorkflowRun.status == "running"`, so both legitimately read 0 on a fresh demo.
 
+- **2026-10-02 — SMTP TLS mode is chosen by port, in one place (`core/smtp.py`).** 465 →
+  `SMTP_SSL`, anything else → `SMTP` + mandatory STARTTLS. The Mail workspace used to open
+  `SMTP_SSL` on any port while the Settings test used STARTTLS, so a port-587 config (Titan,
+  Gmail, Outlook) passed "Test" and 502'd on every "Approve & send" (`WRONG_VERSION_NUMBER`).
+  Never open SMTP outside `open_smtp`.
+
+- **2026-10-02 — Lead discovery runs in code, not in the LLM loop.** `find_leads`
+  (`mcp_tools/lead_finder.py`) discovers + researches + scores in one tool call and is attached to
+  the orchestrator directly. Reason: the demo user's LLM is Groq free tier (8k tokens/min, 200k/day);
+  an LLM-chained discover→scrape→enrich cost ~12k tokens and hit 429 every time. Treat every model
+  call as ~1k fixed tokens (instructions + tool schemas) and keep prompts and tool docstrings terse
+  — the SDK sends every docstring on every call. Measure with an `Agent.__post_init__` spy (see
+  `docs/summery/feature-web-research-smtp-fix.md`).
+
+- **2026-10-02 — Keyless DuckDuckGo search gets blocked after ~25 rapid queries** (HTTP 202 +
+  "anomaly" challenge page). `web_research` raises `SearchBlocked` → reason `search_blocked`; never
+  treat a challenge page as "no results". Reliable discovery needs the user's Google Custom Search
+  key or Google Places.
+
+- **2026-10-02 — Sub-agents use `failure_error_function=None`.** With the SDK default, an LLM 429
+  inside a sub-agent became a tool-error string and the orchestrator re-delegated, multiplying
+  token spend against the limit that caused the failure. Now the error ends the run and
+  `chat.py` reports it (401/429/timeout each get an actionable message).
+
 ---
 
 ## 8. Decision Log

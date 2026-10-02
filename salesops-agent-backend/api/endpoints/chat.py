@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_core.orchestrator import (
     run_orchestrator,
     run_orchestrator_with_events,
-    SALES_AGENT_SYSTEM_PROMPT,
 )
 from core.security import get_current_user, decrypt_token
 from core.user_config import (
@@ -37,8 +36,6 @@ from db.session import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-SYSTEM_PROMPT = {"role": "system", "content": SALES_AGENT_SYSTEM_PROMPT}
 
 async def _resolve_integrations(user: User, db: AsyncSession) -> dict:
     """Load this user's third-party credentials for the orchestrator's tools.
@@ -155,11 +152,9 @@ async def _resolve_run_id(
 
 
 def _build_messages(request: ChatRequest) -> list[dict]:
-    """Convert request messages and inject system prompt."""
-    msgs = [{"role": m.role, "content": m.content} for m in request.messages]
-    if not msgs or msgs[0].get("role") != "system":
-        msgs.insert(0, SYSTEM_PROMPT)
-    return msgs
+    """Request messages as dicts. The system prompt is the agent's instructions,
+    so it is not added here — that sent it twice on every model call."""
+    return [{"role": m.role, "content": m.content} for m in request.messages]
 
 
 def _extract_last_user_message(request: ChatRequest) -> str | None:
