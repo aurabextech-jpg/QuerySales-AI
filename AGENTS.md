@@ -458,6 +458,15 @@ Frontend `.env.local`: `NEXT_PUBLIC_APP_URL`, `API_URL` (server-only), `NEON_AUT
   treat a challenge page as "no results". Reliable discovery needs the user's Google Custom Search
   key or Google Places.
 
+- **2026-10-02 — Agent-added leads go to the app's `leads` table first** (`save_leads_tool` →
+  `services/lead_import.py`), then are mirrored to ERPNext when configured (ERPNext ID kept in
+  `notes`, along with phone and city — the table has no such columns). Before this the chat
+  agent could only write to ERPNext, so "added" leads never appeared on the Leads page (D5).
+  Dedup is case-insensitive on company per user. The tool returns an exact `summary`
+  sentence because gpt-oss-20b once reported a fifth "created" lead with an invented ERPNext ID
+  (`CRM-LEAD-2026-00016` — never existed). Sub-agents run via `as_tool` cannot talk to the user:
+  confirmation of any write happens only in the orchestrator.
+
 - **2026-10-02 — Sub-agents use `failure_error_function=None`.** With the SDK default, an LLM 429
   inside a sub-agent became a tool-error string and the orchestrator re-delegated, multiplying
   token spend against the limit that caused the failure. Now the error ends the run and

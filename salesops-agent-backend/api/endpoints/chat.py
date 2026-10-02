@@ -235,6 +235,7 @@ async def chat_with_agent(
             messages,
             llm_config=llm_cfg,
             run_id=run_id,
+            user_id=current_user.id,
             google_refresh_token=decrypt_token(current_user.google_refresh_token),
             integrations=await _resolve_integrations(current_user, db),
         )
@@ -308,6 +309,7 @@ async def chat_stream(
             messages,
             llm_config=llm_cfg,
             run_id=run_id,
+            user_id=current_user.id,
             google_refresh_token=decrypt_token(
                 current_user.google_refresh_token
             ),

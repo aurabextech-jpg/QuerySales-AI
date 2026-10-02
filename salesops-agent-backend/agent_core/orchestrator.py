@@ -55,6 +55,9 @@ class AgentContext:
     """
 
     run_id: str
+    # From the authenticated request — never from the model. Scopes writes to
+    # the app's own tables (save_leads_tool).
+    user_id: str | None = None
     google_refresh_token: str | None = None
     erpnext: object | None = None
     google_places: object | None = None
@@ -82,6 +85,7 @@ from mcp_tools.google_calendar import (
 from mcp_tools.lead_sources import search_source_sites, SearchSourceSitesInput
 from mcp_tools.google_dork import dork_search, DorkSearchInput
 from mcp_tools.lead_finder import find_leads, FindLeadsInput
+from services.lead_import import LeadToSave, save_leads
 from mcp_tools.web_research import (
     web_search, scrape_page, research_companies,
     CompanyRef, WebSearchInput, ScrapePageInput, ResearchCompaniesInput,
@@ -324,6 +328,25 @@ async def dork_search_tool(
 
 
 @function_tool
+async def save_leads_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    leads: list[LeadToSave],
+) -> dict:
+    """Save confirmed leads to the user's Leads page; also pushes each to ERPNext when configured.
+
+    Args:
+        leads: Up to 10, each with company plus any of contact_name, email, phone,
+            website, industry, city, notes. Copy values from the conversation.
+
+    Returns per-lead saved / skipped (duplicate), with erpnext_id when pushed.
+    """
+    ctx = wrapper.context
+    if not ctx.user_id:
+        return {"status": "error", "message": "No authenticated user for this run."}
+    return await save_leads(ctx.user_id, leads, ctx.erpnext)
+
+
+@function_tool
 async def find_leads_tool(
     wrapper: RunContextWrapper[AgentContext],
     industry: str, city: str, source_url: str | None = None, max_leads: int = 8,
@@ -460,7 +483,9 @@ Tools
   discovers, researches and scores. Use it directly; never ask the user which source to use.
 - lead_generation: other discovery — Google Places, curated sources, decision-makers, or
   researching companies by name. Pass the names and any URLs from the conversation.
-- crm_management: the user's ERPNext CRM (optional; this app's own leads live in its database).
+- save_leads_tool: save confirmed leads to the user's Leads page (and ERPNext when configured).
+  Use it for "add/save these leads", "add them to my CRM / pipeline".
+- crm_management: read, update or analyze ERPNext records (optional integration).
 - outreach: send email, check Google Calendar availability, create events.
 
 Rules
@@ -468,14 +493,15 @@ Rules
 - Writes (CRM records, emails, events) need the user's yes, and YOU ask for it — sub-agents
   cannot talk to the user. Never write right after find_leads_tool.
   1. User asks for a write: list exactly what will be written and ask "Shall I go ahead?".
-  2. User confirms ("yes"): call the sub-agent ONCE with "User confirmed." plus every detail it
-     needs, copied from the conversation — it cannot see the chat. CRM creates: one line per
-     lead, "name | phone | email | website".
+  2. User confirms ("yes"): for leads call save_leads_tool ONCE with every lead's details
+     copied from the conversation. For other writes call the sub-agent ONCE with "User
+     confirmed." plus every detail it needs — it cannot see the chat.
   3. Report the sub-agent's result per item. Never ask the user to confirm twice.
 - Sub-agent tools take one argument, input: a plain-language instruction, never JSON.
 - Ask one question only when a required value is missing (no industry or city, no lead ID).
 - Call a tool once per user message. If it returns nothing, report its notes; do not retry.
 - Report only what tools returned. Never invent contacts, IDs, availability or confirmations.
+  After save_leads_tool, state its `summary` exactly; list only leads in its `results`.
   reason "not_configured": name the integration to add in Settings. reason "search_blocked":
   relay its message.
 - Resolve relative dates ("tomorrow") to YYYY-MM-DD from [Now] before calling a tool.
@@ -589,6 +615,7 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         instructions=SALES_AGENT_SYSTEM_PROMPT,
         tools=[
             find_leads_tool,
+            save_leads_tool,
             lead_gen_agent.as_tool(
                 tool_name="lead_generation",
                 tool_description=(
@@ -700,6 +727,7 @@ async def run_orchestrator(
     *,
     llm_config: ResolvedLLMConfig,
     run_id: str | None = None,
+    user_id: str | None = None,
     google_refresh_token: str | None = None,
     integrations: dict | None = None,
 ) -> str:
@@ -709,6 +737,7 @@ async def run_orchestrator(
     try:
         context = AgentContext(
             run_id=run_id or "",
+            user_id=user_id,
             google_refresh_token=google_refresh_token,
             erpnext=creds.get("erpnext"),
             google_places=creds.get("google_places"),
@@ -748,6 +777,7 @@ async def run_orchestrator_with_events(
     *,
     llm_config: ResolvedLLMConfig,
     run_id: str | None = None,
+    user_id: str | None = None,
     google_refresh_token: str | None = None,
     integrations: dict | None = None,
 ) -> dict:
@@ -774,6 +804,7 @@ async def run_orchestrator_with_events(
     try:
         context = AgentContext(
             run_id=run_id or "",
+            user_id=user_id,
             google_refresh_token=google_refresh_token,
             erpnext=creds.get("erpnext"),
             google_places=creds.get("google_places"),

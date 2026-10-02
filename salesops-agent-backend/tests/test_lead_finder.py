@@ -61,3 +61,16 @@ def test_directory_with_zero_filtered_results_reports_it(monkeypatch):
     )))
     assert result["leads"] == []
     assert any("lists 0 companies" in n for n in result["notes"])
+
+
+def test_save_summary_reports_exactly_what_happened():
+    from services.lead_import import _summary
+
+    text = _summary([
+        {"company": "A Ltd", "status": "saved", "erpnext_id": "CRM-LEAD-1"},
+        {"company": "B Ltd", "status": "saved", "erpnext_error": "ERPNext refused the lead: x"},
+        {"company": "C Ltd", "status": "skipped", "reason": "already in your leads"},
+    ])
+    assert text.startswith("Saved 2 of 3 leads")
+    assert "A Ltd (CRM-LEAD-1)" in text and "B Ltd: ERPNext refused" in text
+    assert "skipped): C Ltd" in text
