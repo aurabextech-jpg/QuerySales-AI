@@ -82,6 +82,7 @@ from mcp_tools.google_calendar import (
 )
 from mcp_tools.lead_sources import search_source_sites, SearchSourceSitesInput
 from mcp_tools.google_dork import dork_search, DorkSearchInput
+from mcp_tools.lead_finder import find_leads, FindLeadsInput
 from mcp_tools.web_research import (
     web_search, scrape_page, research_companies,
     CompanyRef, WebSearchInput, ScrapePageInput, ResearchCompaniesInput,
@@ -122,6 +123,8 @@ async def _call(tool_name: str, arguments: dict, context: AgentContext = None) -
                 return await web_search(WebSearchInput(**arguments), dork)
             case "scrape_page":
                 return await scrape_page(ScrapePageInput(**arguments))
+            case "find_leads":
+                return await find_leads(FindLeadsInput(**arguments), dork)
             case "research_companies":
                 return await research_companies(ResearchCompaniesInput(**arguments), dork)
             case "send_email":
@@ -355,6 +358,36 @@ async def dork_search_tool(
 
 
 @function_tool
+async def find_leads_tool(
+    wrapper: RunContextWrapper[AgentContext],
+    industry: str, city: str, source_url: str | None = None, max_leads: int = 8,
+) -> dict:
+    """Find, research and score companies in ONE call. Use this FIRST for discovery.
+
+    Discovers companies (from `source_url` if the user gave one — applying that
+    directory's own industry/city filters — then from web search), reads each
+    company's website and contact page, and returns scored profiles: website,
+    emails, phones, address, rating, social, score, tier, score_breakdown.
+
+    Args:
+        industry: What the companies do, e.g. "manufacturing", "plastic packaging".
+        city: e.g. "Karachi".
+        source_url: A directory or list URL the user gave, verbatim. Optional.
+        max_leads: 1-8 (default 8).
+
+    Returns:
+        {"status", "leads": [...in city...], "outside_city": [...], "notes": [...]}.
+        Read `notes` — they say what each source yielded (e.g. "directory lists
+        0 companies for Karachi"). reason "search_blocked" means the free search
+        is rate-limited: relay the message, which tells the user how to fix it.
+    """
+    return await _call("find_leads", {
+        "industry": industry, "city": city,
+        "source_url": source_url, "max_leads": max_leads,
+    }, context=wrapper.context)
+
+
+@function_tool
 async def web_search_tool(
     wrapper: RunContextWrapper[AgentContext],
     query: str, max_results: int = 8,
@@ -502,6 +535,8 @@ You manage specialized agents:
    the user gave (verbatim), and what they want back (e.g. "with contact details"). NEVER ask the
    user to pick a source: `lead_generation` uses every available source plus built-in web search,
    and researches each company's website, phone, email and rating itself.
+   Delegate ONCE per user message and present what comes back — do not call `lead_generation`
+   again in the same turn to "try harder"; each call re-runs the whole search.
    For follow-ups about earlier leads ("get their contact info", "research these"), delegate again
    with the company names AND any URLs that appeared earlier in the conversation.
 2. Delegate CRM tasks (creating/reading/updating leads, pipeline analysis) to `crm_management`.
@@ -595,6 +630,12 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
         "or whether to look up contact details — do the whole job in one pass:\n"
         "DISCOVER -> VERIFY -> ENRICH -> SCORE -> REPORT.\n"
         "\n"
+        "## 0. FAST PATH — use this first\n"
+        "For any 'find <industry> companies in <city>' request (with or without a URL), call\n"
+        "`find_leads_tool` ONCE. It discovers, researches and scores in a single call. If it\n"
+        "returns leads, go straight to REPORT. Use the steps below only to add to its results\n"
+        "(e.g. Google Places when configured) or when the user asks about specific companies.\n"
+        "\n"
         "## 1. DISCOVER — collect candidate companies\n"
         "- The user gave a URL: call `scrape_page_tool` on it. A directory returns `listings`,\n"
         "  `filters` and `pagination`. If `filters` cover the request (industry, city), re-scrape with\n"
@@ -646,7 +687,7 @@ def build_orchestrator(llm_cfg: ResolvedLLMConfig) -> Agent[AgentContext]:
     tools=[
         search_leads_multi_tool, search_businesses_tool, get_place_details_tool,
         search_source_sites_tool, dork_search_tool,
-        web_search_tool, scrape_page_tool, research_companies_tool,
+        find_leads_tool, web_search_tool, scrape_page_tool, research_companies_tool,
     ],
     )
 

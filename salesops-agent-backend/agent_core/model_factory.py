@@ -11,7 +11,9 @@ from agents import AsyncOpenAI, OpenAIChatCompletionsModel
 from core.user_config import ResolvedLLMConfig
 
 LLM_TIMEOUT_SECONDS = 90.0
-LLM_MAX_RETRIES = 1
+# Retries honour the provider's retry-after on 429 — free tiers (Groq: 8k TPM)
+# throttle for a few seconds at a time, which a retry absorbs invisibly.
+LLM_MAX_RETRIES = 3
 
 
 def build_model(cfg: ResolvedLLMConfig) -> OpenAIChatCompletionsModel:

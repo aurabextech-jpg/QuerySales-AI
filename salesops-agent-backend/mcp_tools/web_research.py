@@ -85,6 +85,9 @@ _NON_OFFICIAL_DOMAINS = (
     "businessportal.pk", "zaubee", "dnb.com", "crunchbase.com", "glassdoor",
     "indeed.com", "rozee.pk", "olx", "daraz", "tradeindia", "indiamart",
     "alibaba.com", "made-in-china", "kompass", "opencorporates", "bloomberg.com",
+    # Lead-list sellers and listicle hosts — their lists are paywalled or JS-only.
+    "f6s.com", "aeroleads", "rentechdigital", "scribd.com", "businesslist",
+    "pakistani.pk", "placedigger", "zoominfo", "rocketreach", "apollo.io",
 )
 _SOCIAL = {
     "linkedin": "linkedin.com",
@@ -526,11 +529,26 @@ def _ddg_target(href: str) -> str:
     return href
 
 
+class SearchBlocked(Exception):
+    """The keyless engine served a bot challenge instead of results."""
+
+
+SEARCH_BLOCKED_MESSAGE = (
+    "The free web search is temporarily blocking automated queries. For reliable "
+    "lead discovery add a Google Custom Search key (free: 100 queries/day) in "
+    "Settings -> Integrations -> Google Dork Search, or configure Google Places."
+)
+
+
 async def _search_ddg(client: httpx.AsyncClient, query: str, limit: int) -> list[dict[str, str]]:
     response = await client.post(
         DDG_URL, data={"q": query}, headers={"User-Agent": _USER_AGENT}, timeout=FETCH_TIMEOUT
     )
     response.raise_for_status()
+    # A burst of queries gets HTTP 202 + an "anomaly" challenge page. Treating
+    # that as "no results" would make the agent report "no companies exist".
+    if response.status_code == 202 or "anomaly" in response.text[:20000]:
+        raise SearchBlocked(SEARCH_BLOCKED_MESSAGE)
     results: list[dict[str, str]] = []
     blocks = re.split(r'<div[^>]+class="[^"]*\bresult\b', response.text)[1:]
     for block in blocks:
@@ -595,6 +613,8 @@ async def web_search(input_data: WebSearchInput, dork_creds: Any = None) -> dict
                 _search(client, input_data.query, input_data.max_results, dork_creds),
                 FETCH_DEADLINE,
             )
+        except SearchBlocked:
+            return {"status": "error", "reason": "search_blocked", "message": SEARCH_BLOCKED_MESSAGE}
         except Exception as exc:
             logger.warning("web_search failed: %s", type(exc).__name__)
             return {
@@ -726,6 +746,9 @@ async def _research_one(
             for query in (f"{company.name} {city}", f"{company.name} official website"):
                 try:
                     results, _ = await _search(client, query.strip(), 8, dork_creds)
+                except SearchBlocked:
+                    profile["notes"].append("web search blocked; pass a website to research this company")
+                    break
                 except Exception as exc:
                     profile["notes"].append(f"search failed ({type(exc).__name__})")
                     break
